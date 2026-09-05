@@ -79,3 +79,56 @@ cli.py ──> scanner.py (Orchestrator)
                 ├── http_client.py       # Async HTTP Wrapper
                 ├── models.py            # Dataclasses & CVSS Scoring
                 └── reporter.py          # JSON & Jinja2 HTML Generator
+
+🚀 Usage
+# Full Comprehensive Scan (Recon + Vulnerabilities)
+python cli.py scan [https://target.com](https://target.com)
+
+# Reconnaissance Only
+python cli.py scan [https://target.com](https://target.com) --mode recon
+
+# Vulnerability Audit Only
+python cli.py scan [https://target.com](https://target.com) --mode vulns
+
+# Custom Port Scanning without Subdomain Enumeration
+python cli.py scan [https://target.com](https://target.com) --no-subdomains --ports extended
+
+# Adjusting Adaptive Rate Limit (RPS)
+python cli.py scan [https://target.com](https://target.com) --rps 5
+
+# Export to JSON format only
+python cli.py scan [https://target.com](https://target.com) --format json
+
+CLI Arguments Overview
+
+| Option | Description | Default |
+| --- | --- | --- |
+| target | Target URL (e.g., [https://target.com](https://target.com)) | Required |
+| --mode | Scan mode (full, recon, vulns) | full |
+| --ports | Port scan range (common, extended, full) | common |
+| --rps | Initial Requests Per Second limit | 10 |
+| --no-subdomains | Skip Subdomain enumeration phase | False |
+| --format | Output report format (html, json, all) | all |
+
+⚙️ Configuration & Risk Assessment
+
+Findings are rated based on the CVSS v3.1 framework:
+
+| Severity | CVSS Score | Example Vulnerabilities |
+
+| 🔴 CRITICAL | 9.0 – 10.0 | SQLi, RCE, SSRF with Cloud Metadata, Weak JWT Secret |
+| 🟠 HIGH | 7.0 – 8.9 | Stored/Reflected XSS, Unauthenticated IDOR, CORS with Credentials, .git Exposure |
+| 🟡 MEDIUM | 4.0 – 6.9 | Reflected XSS (Restricted), Open Redirect, Wildcard CORS |
+| 🔵 LOW | 1.0 – 3.9 | Missing Security Headers, Server Version Disclosure |
+| ⚪ INFO | 0.0 – 0.9 | Technology Fingerprint, Port Banner Discovery |
+
+🗺 Roadmap
+
+[ ] Authenticated Scope Scanning: Native support for --cookie and --header session preservation across authenticated panels.
+[ ] Multi-Role IDOR Diff Engine: Automated differential testing between User A and User B session tokens.
+[ ] Headless DOM Analysis: Integration with Playwright for Blind XSS and JavaScript SPA route extraction.
+[ ] PyPI Package Release: Distribution via pip install bugscanner.
+
+⚠️ Disclaimer
+
+IMPORTANT: This tool is developed for educational purposes, defensive auditing, and authorized penetration testing / bug bounty activities only. Scanning targets without prior explicit consent is illegal and punishable by law. The developer assumes no liability and is not responsible for any misuse or damage caused by this program.
