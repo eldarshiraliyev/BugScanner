@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Reports / generated files
+reports/
+output/
+
+# Test artifacts
+*.tmp
+*.bak
+
+# Secrets / credentials
+*.pem
+*.key
+credentials.json
+secrets.json

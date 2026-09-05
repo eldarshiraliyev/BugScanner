@@ -1,0 +1,32 @@
+rate_limiting:
+  default_rps: 10           # requests per second
+  min_rps: 1
+  max_rps: 50
+  backoff_multiplier: 2
+  pause_on_503: 30          # seconds
+
+scanning:
+  timeout: 10               # seconds per request
+  max_redirects: 5
+  user_agent: "Mozilla/5.0 (compatible; BugScanner/1.0; +https://bugbounty)"
+  verify_ssl: false
+
+ports:
+  common: [21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 3306, 3389, 5432, 6379, 8080, 8443, 8888, 9200, 27017]
+  extended: [20, 21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1723, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 8888, 9200, 27017]
+
+severity:
+  critical: 9.0
+  high: 7.0
+  medium: 4.0
+  low: 1.0
+
+nuclei:
+  enabled: true
+  templates_path: "~/.local/nuclei-templates"
+  severity: ["critical", "high", "medium", "low"]
+  rate_limit: 150
+
+output:
+  default_format: ["terminal", "json", "html"]
+  reports_dir: "./reports"
