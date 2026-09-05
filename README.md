@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🐛 BugScanner
+# 🐛 Vulnview
 
 **An Advanced, Context-Aware Recon & Automated Web Vulnerability Assessment Framework**
 
@@ -22,7 +22,7 @@
 
 ## 📌 Overview
 
-**BugScanner** is a modular, high-performance web vulnerability scanner and reconnaissance framework engineered specifically for **Bug Bounty Hunters**, **Red Teams**, and **Penetration Testers**. 
+**Vulnview** is a modular, high-performance web vulnerability scanner and reconnaissance framework engineered specifically for **Bug Bounty Hunters**, **Red Teams**, and **Penetration Testers**. 
 
 Unlike standard passive scanners, BugScanner combines deep sub-domain discovery, active TCP service fingerprinting, and a **Context-Aware Vulnerability Verification Engine** designed to minimize false positives and bypass modern Web Application Firewalls (WAFs) through adaptive rate limiting and jitter control.
 
@@ -55,7 +55,7 @@ Unlike standard passive scanners, BugScanner combines deep sub-domain discovery,
 
 ## 🏗 Architecture
 
-BugScanner uses a modular, asynchronous architecture built on top of `asyncio` and `httpx`:
+Vulnview uses a modular, asynchronous architecture built on top of `asyncio` and `httpx`:
 
 ```text
 cli.py ──> scanner.py (Orchestrator)
