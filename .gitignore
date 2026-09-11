@@ -24,9 +24,11 @@ Thumbs.db
 # Logs
 *.log
 
-# Reports / generated files
-reports/
+# Reports / generated files — generated scan outputs
+reports/*.json
+reports/*.html.bak
 output/
+!reports/template.html
 
 # Test artifacts
 *.tmp

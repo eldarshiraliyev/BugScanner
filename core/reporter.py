@@ -7,7 +7,7 @@ import asyncio
 import aiofiles
 from pathlib import Path
 from datetime import datetime
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 from markupsafe import Markup, escape
 from rich.console import Console
 from core.models import ScanResult
@@ -47,12 +47,12 @@ class Reporter:
 
         self.jinja = Environment(
             loader=FileSystemLoader(str(TEMPLATE_DIR)),
-            autoescape=True,  # XSS qoruması
+            autoescape=True,
         )
-        self.jinja.filters["format_dt"]  = format_dt
-        self.jinja.filters["safe_text"]  = safe_text
-        self.jinja.filters["safe_code"]  = safe_code
-        self.jinja.globals["Markup"]     = Markup
+        self.jinja.filters["format_dt"] = format_dt
+        self.jinja.filters["safe_text"] = safe_text
+        self.jinja.filters["safe_code"] = safe_code
+        self.jinja.globals["Markup"] = Markup
 
     def _filename_base(self, target: str) -> str:
         safe = (target
@@ -72,17 +72,27 @@ class Reporter:
         console.print(f"[green]💾 JSON report:[/green] {path}")
         return path
 
-    async def save_html(self, result: ScanResult) -> Path:
+    async def save_html(self, result: ScanResult) -> Path | None:
+        # BUG FIX 2: template tapılmasa proqram çökmür,
+        # xəbərdarlıq verib None qaytarır.
         base = self._filename_base(result.target)
         path = self.output_dir / f"{base}.html"
-        template = self.jinja.get_template("template.html")
+        try:
+            template = self.jinja.get_template("template.html")
+        except TemplateNotFound:
+            console.print(
+                "[yellow]⚠ HTML template tapılmadı "
+                f"({TEMPLATE_DIR / 'template.html'}). "
+                "HTML report atlanır.[/yellow]"
+            )
+            return None
         html = template.render(result=result, format_dt=format_dt)
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
             await f.write(html)
         console.print(f"[green]🌐 HTML report:[/green] {path}")
         return path
 
-    async def save_all(self, result: ScanResult) -> dict[str, Path]:
+    async def save_all(self, result: ScanResult) -> dict[str, Path | None]:
         json_path, html_path = await asyncio.gather(
             self.save_json(result),
             self.save_html(result),

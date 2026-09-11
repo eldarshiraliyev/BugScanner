@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BugScanner Report — {{ result.target }}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'Segoe UI', monospace;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    h1 { color: #58a6ff; margin-bottom: 0.5rem; }
+    h3 { margin-bottom: 0.4rem; }
+    .meta { color: #8b949e; margin-bottom: 2rem; font-size: 0.9rem; }
+    .meta span { margin-right: 2rem; }
+    .summary {
+      display: flex; gap: 1rem; flex-wrap: wrap;
+      margin-bottom: 2rem;
+    }
+    .stat {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 0.8rem 1.2rem;
+      text-align: center;
+      min-width: 100px;
+    }
+    .stat .num { font-size: 1.8rem; font-weight: bold; color: #58a6ff; }
+    .stat .lbl { font-size: 0.75rem; color: #8b949e; }
+    .vuln {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-left: 4px solid #30363d;
+      border-radius: 6px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1rem;
+    }
+    .vuln.CRITICAL { border-left-color: #da3633; }
+    .vuln.HIGH     { border-left-color: #f85149; }
+    .vuln.MEDIUM   { border-left-color: #e3b341; }
+    .vuln.LOW      { border-left-color: #3fb950; }
+    .vuln.INFO     { border-left-color: #58a6ff; }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 12px;
+      margin-right: 6px;
+      font-weight: bold;
+    }
+    .badge.CRITICAL { background:#da3633; color:#fff; }
+    .badge.HIGH     { background:#f85149; color:#fff; }
+    .badge.MEDIUM   { background:#e3b341; color:#000; }
+    .badge.LOW      { background:#3fb950; color:#000; }
+    .badge.INFO     { background:#58a6ff; color:#000; }
+    .url { font-size: 0.82rem; color: #8b949e; word-break: break-all; margin: 0.4rem 0; }
+    .desc { margin: 0.5rem 0; font-size: 0.92rem; }
+    details { margin-top: 0.6rem; }
+    summary {
+      cursor: pointer;
+      color: #58a6ff;
+      font-size: 0.85rem;
+      user-select: none;
+    }
+    pre {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 0.8rem;
+      margin-top: 0.4rem;
+      font-size: 0.82rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #c9d1d9;
+    }
+    hr { border: none; border-top: 1px solid #30363d; margin: 2rem 0; }
+    .no-vulns { color: #3fb950; font-size: 1.1rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+
+  <h1>🐛 BugScanner — Security Report</h1>
+  <div class="meta">
+    <span>🎯 <strong>Target:</strong> {{ result.target }}</span>
+    <span>🕐 <strong>Started:</strong> {{ result.started_at | format_dt }}</span>
+    <span>🏁 <strong>Finished:</strong> {{ result.finished_at | format_dt }}</span>
+  </div>
+
+  <div class="summary">
+    <div class="stat">
+      <div class="num">{{ result.vulnerabilities | length }}</div>
+      <div class="lbl">Total Vulns</div>
+    </div>
+    <div class="stat">
+      <div class="num" style="color:#f85149;">
+        {{ result.vulnerabilities | selectattr('severity.name','equalto','HIGH') | list | length }}
+      </div>
+      <div class="lbl">HIGH</div>
+    </div>
+    <div class="stat">
+      <div class="num" style="color:#e3b341;">
+        {{ result.vulnerabilities | selectattr('severity.name','equalto','MEDIUM') | list | length }}
+      </div>
+      <div class="lbl">MEDIUM</div>
+    </div>
+    <div class="stat">
+      <div class="num" style="color:#3fb950;">
+        {{ result.vulnerabilities | selectattr('severity.name','equalto','LOW') | list | length }}
+      </div>
+      <div class="lbl">LOW</div>
+    </div>
+    <div class="stat">
+      <div class="num">{{ "%.2f" | format(result.risk_score) }}/10</div>
+      <div class="lbl">Risk Score</div>
+    </div>
+  </div>
+
+  <hr>
+
+  {% if result.vulnerabilities %}
+    {% for v in result.vulnerabilities %}
+    <div class="vuln {{ v.severity.name }}">
+      <h3>
+        <span class="badge {{ v.severity.name }}">{{ v.severity.name }}</span>
+        {{ v.title }}
+        <small style="color:#8b949e; font-weight:normal;">— CVSS {{ v.cvss_score }}</small>
+      </h3>
+      <div class="url">🔗 {{ v.url }}</div>
+      {% if v.parameter %}
+      <div class="url">📌 Parameter: <code>{{ v.parameter }}</code> | Method: {{ v.method }}</div>
+      {% endif %}
+      <div class="desc">{{ v.description | safe_text }}</div>
+      {% if v.evidence %}
+      <details>
+        <summary>🔍 Evidence</summary>
+        <pre>{{ v.evidence | safe_code }}</pre>
+      </details>
+      {% endif %}
+      {% if v.exploitation %}
+      <details>
+        <summary>💥 PoC / Exploitation</summary>
+        <pre>{{ v.exploitation | safe_code }}</pre>
+      </details>
+      {% endif %}
+      {% if v.curl_poc %}
+      <details>
+        <summary>🖥 cURL PoC</summary>
+        <pre>{{ v.curl_poc | safe_code }}</pre>
+      </details>
+      {% endif %}
+      {% if v.remediation %}
+      <details>
+        <summary>🛠 Remediation</summary>
+        <pre>{{ v.remediation | safe_code }}</pre>
+      </details>
+      {% endif %}
+      {% if v.references %}
+      <details>
+        <summary>📚 References</summary>
+        <pre>{% for ref in v.references %}{{ ref }}
+{% endfor %}</pre>
+      </details>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="no-vulns">✅ Heç bir vulnerability tapılmadı.</p>
+  {% endif %}
+
+</body>
+</html>

