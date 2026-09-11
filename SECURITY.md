@@ -13,8 +13,7 @@ If you discover a security vulnerability in BugScanner, please do NOT open a pub
 Instead, report it privately via GitHub's Security Advisory:
 👉 https://github.com/eldarshiraliyev/BugScanner/security/advisories/new
 
-Or contact directly: eldarshiraliyev@[email]
-
+Or contact directly: idkmyacc@proton.me
 **What to include:**
 - Description of the vulnerability
 - Steps to reproduce
