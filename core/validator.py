@@ -1,6 +1,6 @@
 """
 False-Positive Validator
-Hər tapıntını ikinci dəfə verify edir
+Re-verifies each finding before reporting.
 """
 
 import asyncio
@@ -11,13 +11,16 @@ from core.models import Vulnerability, Severity
 
 console = Console()
 
+# SQL markers that indicate a time-based payload
+SQLI_TIME_MARKERS = ("SLEEP", "WAITFOR", "PG_SLEEP", "BENCHMARK")
+
 
 class FalsePositiveValidator:
     def __init__(self, http_client):
         self.http_client = http_client
 
     async def validate_xss(self, vuln: Vulnerability) -> bool:
-        """XSS-i 3 dəfə yoxla — hər dəfə response analiz et"""
+        """XSS — 3 re-checks, at least 2 must confirm."""
         if not vuln.payload_used:
             return True
 
@@ -28,25 +31,27 @@ class FalsePositiveValidator:
                 confirmed += 1
             await asyncio.sleep(0.5)
 
-        # 3-dən 2-si confirm edərsə — real
         result = confirmed >= 2
         if not result:
             console.print(f"  [dim]FP filtered: XSS {vuln.url[:50]}[/dim]")
         return result
 
     async def validate_sqli_time(self, vuln: Vulnerability) -> bool:
-        """Time-based SQLi — 3 dəfə təkrarlа, orta hesabla"""
-        if not vuln.url or "SLEEP" not in (vuln.payload_used or "").upper():
+        """
+        Time-based SQLi — 3 repetitions, averaged.
+
+        Supports MySQL (SLEEP), MSSQL (WAITFOR), PostgreSQL (pg_sleep),
+        and MySQL (BENCHMARK).
+        """
+        payload_upper = (vuln.payload_used or "").upper()
+        if not vuln.url or not any(m in payload_upper for m in SQLI_TIME_MARKERS):
             return True
 
-        # Base URL-i çıxar (payload olmadan)
-        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        from urllib.parse import urlparse, urlunparse
         parsed = urlparse(vuln.url)
-        params = parse_qs(parsed.query)
-
         base_url = urlunparse(parsed._replace(query=""))
 
-        # Baseline — 3 normal request
+        # Baseline — 3 clean requests
         baselines = []
         for _ in range(3):
             t0 = time.monotonic()
@@ -55,7 +60,7 @@ class FalsePositiveValidator:
             await asyncio.sleep(0.3)
         baseline_avg = sum(baselines) / len(baselines)
 
-        # Payload ilə 3 request
+        # Payload — 3 requests
         delays = []
         for _ in range(3):
             t0 = time.monotonic()
@@ -64,7 +69,6 @@ class FalsePositiveValidator:
             await asyncio.sleep(0.5)
         delay_avg = sum(delays) / len(delays)
 
-        # Hər üç request-də də gecikməlidir
         all_delayed = all(d > baseline_avg + 2.0 for d in delays)
         significant = delay_avg > baseline_avg + 2.5
 
@@ -77,7 +81,7 @@ class FalsePositiveValidator:
         return result
 
     async def validate_cors(self, vuln: Vulnerability) -> bool:
-        """CORS-u fərqli User-Agent ilə yenidən yoxla"""
+        """CORS — re-check with a different User-Agent."""
         if not vuln.url:
             return True
 
@@ -86,7 +90,7 @@ class FalsePositiveValidator:
             headers={
                 "Origin": "https://evil.com",
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/124.0.0.0",
-            }
+            },
         )
         if not resp:
             return False
@@ -98,7 +102,7 @@ class FalsePositiveValidator:
         return result
 
     async def validate_redirect(self, vuln: Vulnerability) -> bool:
-        """Redirect-i follow_redirects=False ilə yoxla"""
+        """Open redirect — re-check with follow_redirects=False."""
         if not vuln.url:
             return True
         try:
@@ -109,17 +113,19 @@ class FalsePositiveValidator:
                 resp = await client.get(vuln.url)
                 location = resp.headers.get("location", "")
                 result = (
-                    resp.status_code in [301, 302, 303, 307, 308]
+                    resp.status_code in (301, 302, 303, 307, 308)
                     and "evil.com" in location
                 )
                 if not result:
-                    console.print(f"  [dim]FP filtered: Redirect {vuln.url[:50]}[/dim]")
+                    console.print(
+                        f"  [dim]FP filtered: Redirect {vuln.url[:50]}[/dim]"
+                    )
                 return result
         except Exception:
             return False
 
     async def validate_disclosure(self, vuln: Vulnerability) -> bool:
-        """Disclosure-u yenidən yoxla — 200 statusu sabitdirsə real"""
+        """Disclosure — 200 status stable across re-checks?"""
         if not vuln.url:
             return True
 
@@ -132,11 +138,13 @@ class FalsePositiveValidator:
 
         result = all(s == 200 for s in responses) and len(responses) == 2
         if not result:
-            console.print(f"  [dim]FP filtered: Disclosure {vuln.url[:50]}[/dim]")
+            console.print(
+                f"  [dim]FP filtered: Disclosure {vuln.url[:50]}[/dim]"
+            )
         return result
 
     async def validate(self, vuln: Vulnerability) -> bool:
-        """Vuln tipinə görə uyğun validator çağır"""
+        """Dispatch to the appropriate validator based on vuln type."""
         try:
             vtype = vuln.vuln_type.lower()
 
@@ -150,9 +158,7 @@ class FalsePositiveValidator:
                 return await self.validate_redirect(vuln)
             elif "disclosure" in vtype and "git" not in vuln.title.lower():
                 return await self.validate_disclosure(vuln)
-            else:
-                # Digər vulnerability tipləri — default true
-                return True
+            return True
         except Exception:
             return True
 
@@ -160,7 +166,7 @@ class FalsePositiveValidator:
         self, vulns: list[Vulnerability]
     ) -> tuple[list[Vulnerability], list[Vulnerability]]:
         """
-        Bütün vulnerability-ləri validate et
+        Validate all vulnerabilities.
         Returns: (confirmed, filtered_as_fp)
         """
         if not vulns:
@@ -168,18 +174,17 @@ class FalsePositiveValidator:
 
         console.print(
             f"\n[bold cyan]🔬 False-Positive validation:[/bold cyan] "
-            f"{len(vulns)} tapıntı yoxlanılır..."
+            f"verifying {len(vulns)} findings..."
         )
 
-        # Yalnız medium/high/critical validate et
-        # Info/Low-u birbaşa keç
+        # Only Medium+ get validated; Low/Info pass through
         to_validate = [
             v for v in vulns
-            if v.severity.value in ["critical", "high", "medium"]
+            if v.severity.value in ("critical", "high", "medium")
         ]
         skip = [
             v for v in vulns
-            if v.severity.value in ["low", "info"]
+            if v.severity.value in ("low", "info")
         ]
 
         semaphore = asyncio.Semaphore(5)
@@ -191,7 +196,7 @@ class FalsePositiveValidator:
 
         results = await asyncio.gather(
             *[validate_with_sem(v) for v in to_validate],
-            return_exceptions=True
+            return_exceptions=True,
         )
 
         confirmed = list(skip)

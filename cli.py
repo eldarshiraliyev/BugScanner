@@ -33,7 +33,7 @@ def print_banner():
 
 
 def parse_cookies(cookie_list: tuple) -> dict:
-    """'name=value' formatından dict yarat"""
+    """Parse 'name=value' strings into a dict."""
     result = {}
     for c in cookie_list:
         c = c.strip()
@@ -42,14 +42,14 @@ def parse_cookies(cookie_list: tuple) -> dict:
             result[k.strip()] = v.strip()
         else:
             console.print(
-                f"[yellow]⚠️  Cookie parse xətası:[/yellow] '{c}' "
-                f"— 'name=value' formatında olmalıdır"
+                f"[yellow]⚠️  Cookie parse error:[/yellow] '{c}' "
+                f"— expected format 'name=value'"
             )
     return result
 
 
 def parse_headers(header_list: tuple) -> dict:
-    """'Name: Value' formatından dict yarat"""
+    """Parse 'Name: Value' strings into a dict."""
     result = {}
     for h in header_list:
         h = h.strip()
@@ -58,8 +58,8 @@ def parse_headers(header_list: tuple) -> dict:
             result[k.strip()] = v.strip()
         else:
             console.print(
-                f"[yellow]⚠️  Header parse xətası:[/yellow] '{h}' "
-                f"— 'Name: Value' formatında olmalıdır"
+                f"[yellow]⚠️  Header parse error:[/yellow] '{h}' "
+                f"— expected format 'Name: Value'"
             )
     return result
 
@@ -76,26 +76,26 @@ def cli():
     "--mode", "-m",
     type=click.Choice(["all", "recon", "vulns"]),
     default="all",
-    help="Scan modu (default: all)",
+    help="Scan mode (default: all)",
     show_default=True,
 )
 @click.option(
     "--ports", "-p",
     type=click.Choice(["common", "extended", "full"]),
     default="common",
-    help="Port scan dərinliyi (default: common)",
+    help="Port scan depth (default: common)",
     show_default=True,
 )
 @click.option(
     "--no-subdomains",
     is_flag=True,
     default=False,
-    help="Subdomain scan-ı atla",
+    help="Skip subdomain enumeration",
 )
 @click.option(
     "--output", "-o",
     default="./reports",
-    help="Report qovluğu (default: ./reports)",
+    help="Report directory (default: ./reports)",
     show_default=True,
 )
 @click.option(
@@ -109,18 +109,18 @@ def cli():
     "--rps",
     type=float,
     default=10.0,
-    help="Saniyədə max request (default: 10)",
+    help="Max requests per second (default: 10)",
     show_default=True,
 )
 @click.option(
     "--cookie", "-c",
     multiple=True,
-    help='Cookie — "name=value" (bir neçə dəfə istifadə et)',
+    help='Cookie — "name=value" (repeatable)',
 )
 @click.option(
     "--header", "-H",
     multiple=True,
-    help='Custom header — "Name: Value"',
+    help='Custom header — "Name: Value" (repeatable)',
 )
 @click.option(
     "--proxy",
@@ -131,19 +131,19 @@ def cli():
     "--business-logic",
     is_flag=True,
     default=False,
-    help="Business logic scan (authenticated scan üçün tövsiyə edilir)",
+    help="Enable business logic scan (recommended for authenticated scans)",
 )
 @click.option(
     "--no-fp-validation",
     is_flag=True,
     default=False,
-    help="False-positive validation-ı söndür (sürətli scan üçün)",
+    help="Disable false-positive validation (faster scans)",
 )
 @click.option(
     "--no-nuclei",
     is_flag=True,
     default=False,
-    help="Nuclei scan-ı atla",
+    help="Skip Nuclei scan",
 )
 def scan(
     url, mode, ports, no_subdomains, output, format,
@@ -151,11 +151,11 @@ def scan(
     business_logic, no_fp_validation, no_nuclei,
 ):
     """
-    Hədəf URL-i skan et.
+    Scan a target URL.
 
     \b
-    Nümunələr:
-      # Sadə scan
+    Examples:
+      # Simple scan
       python cli.py scan https://target.com
 
       # Authenticated scan
@@ -163,7 +163,7 @@ def scan(
         --cookie "session=abc123" \\
         --cookie "csrf=xyz789"
 
-      # Bearer token ilə
+      # With Bearer token
       python cli.py scan https://target.com \\
         --header "Authorization: Bearer eyJ..."
 
@@ -173,13 +173,13 @@ def scan(
         --proxy http://127.0.0.1:8080 \\
         --business-logic
 
-      # Sürətli scan — FP validation söndür
+      # Fast scan — disable FP validation
       python cli.py scan https://target.com \\
         --no-subdomains \\
         --no-fp-validation \\
         --rps 20
 
-      # WAF olan hədəf — yavaş, ehtiyatlı
+      # WAF-protected target — slow and careful
       python cli.py scan https://target.com \\
         --rps 3 \\
         --no-subdomains \\
@@ -187,26 +187,19 @@ def scan(
     """
     print_banner()
 
-    # Cookie + Header parse
     parsed_cookies = parse_cookies(cookie)
     parsed_headers = parse_headers(header)
 
     if parsed_cookies:
-        console.print(
-            f"[green]🍪 Cookie:[/green] "
-            f"{', '.join(parsed_cookies.keys())}"
-        )
+        console.print(f"[green]🍪 Cookies:[/green] {', '.join(parsed_cookies.keys())}")
     if parsed_headers:
-        console.print(
-            f"[green]📋 Headers:[/green] "
-            f"{', '.join(parsed_headers.keys())}"
-        )
+        console.print(f"[green]📋 Headers:[/green] {', '.join(parsed_headers.keys())}")
     if proxy:
         console.print(f"[green]🔀 Proxy:[/green] {proxy}")
     if business_logic:
-        console.print("[green]🧠 Business Logic:[/green] aktiv")
+        console.print("[green]🧠 Business Logic:[/green] enabled")
 
-    # Config tənzimlə
+    # Config override for RPS
     config = None
     if rps != 10.0:
         from core.scanner import load_config
@@ -221,6 +214,7 @@ def scan(
             proxy=proxy,
             validate_fp=not no_fp_validation,
             run_business_logic=business_logic,
+            run_nuclei=not no_nuclei,
         )
 
         result = await scanner.scan(
@@ -238,12 +232,9 @@ def scan(
         else:
             await reporter.save_all(result)
 
-        # Xülasə çap et
         console.print(
-            f"\n[bold green]✅ Scan tamamlandı![/bold green] "
-            f"Reports: {output}/"
+            f"\n[bold green]✅ Scan completed![/bold green] Reports: {output}/"
         )
-
         return result
 
     asyncio.run(run())
@@ -260,10 +251,10 @@ def scan(
 @click.option("--output", "-o", default="./reports")
 def recon(url, ports, no_subdomains, output):
     """
-    Yalnız recon — subdomain + port + fingerprint + discovery.
+    Recon only — subdomains + ports + fingerprint + discovery.
 
     \b
-    Nümunə:
+    Example:
       python cli.py recon https://target.com --ports extended
     """
     print_banner()
@@ -291,10 +282,10 @@ def recon(url, ports, no_subdomains, output):
 @click.option("--no-fp-validation", is_flag=True, default=False)
 def vulnscan(url, cookie, header, proxy, output, no_fp_validation):
     """
-    Yalnız vulnerability scan — recon-suz.
+    Vulnerability scan only — no recon.
 
     \b
-    Nümunə:
+    Example:
       python cli.py vulnscan https://target.com \\
         --cookie "session=abc123"
     """
@@ -329,10 +320,10 @@ def vulnscan(url, cookie, header, proxy, output, no_fp_validation):
 @click.option("--output", "-o", default="./reports")
 def bizlogic(url, cookie, header, proxy, output):
     """
-    Yalnız business logic scan — authenticated.
+    Business logic scan only — authenticated.
 
     \b
-    Nümunə:
+    Example:
       python cli.py bizlogic https://target.com \\
         --cookie "session=abc123" \\
         --proxy http://127.0.0.1:8080
@@ -344,9 +335,9 @@ def bizlogic(url, cookie, header, proxy, output):
 
     if not parsed_cookies and not parsed_headers:
         console.print(
-            "[yellow]⚠️  Xəbərdarlıq:[/yellow] "
-            "Business logic scan authenticated olmadan "
-            "məhdud nəticə verir. --cookie ilə istifadə et."
+            "[yellow]⚠️  Warning:[/yellow] "
+            "Business logic scan produces limited results without "
+            "authentication. Use --cookie to authenticate."
         )
 
     async def run():
@@ -370,7 +361,7 @@ def bizlogic(url, cookie, header, proxy, output):
 
 @cli.command()
 def version():
-    """Versiya məlumatı"""
+    """Show version information."""
     console.print("[bold cyan]BugScanner[/bold cyan] v2.0")
     console.print("[dim]Bug Bounty Automation Tool[/dim]")
     console.print("[dim]Authorized use only[/dim]")

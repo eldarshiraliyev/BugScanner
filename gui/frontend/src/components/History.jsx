@@ -21,12 +21,10 @@ export default function History({ onSelect }) {
 
   return (
     <div>
-      <h2 style={{ marginBottom: '1.5rem', color: '#94a3b8' }}>
-        Scan Tarixi
-      </h2>
+      <h2 style={{ marginBottom: '1.5rem', color: '#94a3b8' }}>Scan History</h2>
       {scans.length === 0 ? (
         <div style={{ textAlign: 'center', color: '#475569', padding: '4rem' }}>
-          Hələ heç bir scan yoxdur
+          No scans yet
         </div>
       ) : (
         scans.map(scan => (
@@ -60,7 +58,7 @@ export default function History({ onSelect }) {
               </div>
               {scan.result && (
                 <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.2rem' }}>
-                  {scan.result.summary?.total_vulnerabilities || 0} vuln ·
+                  {scan.result.summary?.total_vulnerabilities || 0} vulns ·
                   Risk: {scan.result.summary?.risk_score}/10
                 </div>
               )}

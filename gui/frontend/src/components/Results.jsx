@@ -10,9 +10,7 @@ const SEV_COLORS = {
   info:     { bg: '#1e293b', border: '#475569', text: '#94a3b8' },
 }
 
-const SEV_EMOJI = {
-  critical: '🔴', high: '🟠', medium: '🟡', low: '🔵', info: '⚪'
-}
+const SEV_EMOJI = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵', info: '⚪' }
 
 function Badge({ sev }) {
   const c = SEV_COLORS[sev] || SEV_COLORS.info
@@ -41,8 +39,7 @@ function VulnCard({ vuln }) {
       <div
         onClick={() => setOpen(o => !o)}
         style={{
-          display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '0.9rem 1.2rem', cursor: 'pointer',
         }}
       >
@@ -63,10 +60,10 @@ function VulnCard({ vuln }) {
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: '1rem'
+            gap: '1rem',
           }}>
             {[
-              ['📋 Təsvir', vuln.description],
+              ['📋 Description', vuln.description],
               ['🔍 Evidence', vuln.evidence],
               ['💥 Exploitation', vuln.exploitation],
               ['🛡️ Remediation', vuln.remediation],
@@ -160,7 +157,7 @@ export default function Results({ scanId, onResult }) {
 
       if (msg.type === 'error') {
         setStatus('error')
-        setLogs(l => [...l, { text: `❌ Xəta: ${msg.message}`, time: new Date().toISOString() }])
+        setLogs(l => [...l, { text: `❌ Error: ${msg.message}`, time: new Date().toISOString() }])
       }
     }
 
@@ -183,7 +180,7 @@ export default function Results({ scanId, onResult }) {
     return (
       <div style={{ textAlign: 'center', color: '#475569', marginTop: '5rem' }}>
         <div style={{ fontSize: '3rem' }}>🎯</div>
-        <p style={{ marginTop: '1rem' }}>Scan başlatmaq üçün Scanner-ə keç</p>
+        <p style={{ marginTop: '1rem' }}>Start a scan from the Scanner tab</p>
       </div>
     )
   }
@@ -194,8 +191,7 @@ export default function Results({ scanId, onResult }) {
       <div style={{
         display: 'flex', alignItems: 'center', gap: '1rem',
         marginBottom: '1.5rem', padding: '1rem 1.2rem',
-        background: '#1e293b', border: '1px solid #334155',
-        borderRadius: '10px',
+        background: '#1e293b', border: '1px solid #334155', borderRadius: '10px',
       }}>
         <div style={{
           width: 10, height: 10, borderRadius: '50%',
@@ -205,14 +201,14 @@ export default function Results({ scanId, onResult }) {
           animation: status === 'running' ? 'pulse 1.5s infinite' : 'none',
         }} />
         <span style={{ fontWeight: 600 }}>
-          {status === 'running' ? 'Skan davam edir...'
-            : status === 'completed' ? '✅ Tamamlandı'
-            : status === 'error' ? '❌ Xəta baş verdi'
-            : 'Qoşulur...'}
+          {status === 'running' ? 'Scan in progress...'
+            : status === 'completed' ? '✅ Completed'
+            : status === 'error' ? '❌ Error'
+            : 'Connecting...'}
         </span>
         {result && (
           <span style={{ marginLeft: 'auto', color: '#64748b', fontSize: '0.85rem' }}>
-            Risk skoru:&nbsp;
+            Risk score:&nbsp;
             <strong style={{ color: '#f59e0b' }}>{result.summary?.risk_score}/10</strong>
           </span>
         )}
@@ -225,13 +221,13 @@ export default function Results({ scanId, onResult }) {
           gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
           gap: '0.8rem', marginBottom: '1.5rem',
         }}>
-          <StatCard label="Subdomains"     value={summary.subdomains_found || 0} color="#38bdf8" />
-          <StatCard label="Açıq Portlar"   value={summary.open_ports || 0}       color="#38bdf8" />
-          <StatCard label="Endpoints"      value={summary.endpoints_found || 0}  color="#38bdf8" />
-          <StatCard label="Critical"       value={bySev.critical || 0}           color="#f87171" />
-          <StatCard label="High"           value={bySev.high || 0}               color="#fb923c" />
-          <StatCard label="Medium"         value={bySev.medium || 0}             color="#fbbf24" />
-          <StatCard label="Low"            value={bySev.low || 0}                color="#60a5fa" />
+          <StatCard label="Subdomains" value={summary.subdomains_found || 0} color="#38bdf8" />
+          <StatCard label="Open Ports" value={summary.open_ports || 0} color="#38bdf8" />
+          <StatCard label="Endpoints"  value={summary.endpoints_found || 0} color="#38bdf8" />
+          <StatCard label="Critical"   value={bySev.critical || 0} color="#f87171" />
+          <StatCard label="High"       value={bySev.high || 0} color="#fb923c" />
+          <StatCard label="Medium"     value={bySev.medium || 0} color="#fbbf24" />
+          <StatCard label="Low"        value={bySev.low || 0} color="#60a5fa" />
         </div>
       )}
 
@@ -247,7 +243,7 @@ export default function Results({ scanId, onResult }) {
           }}>
             {tab === 'vulns' ? `Vulnerabilities (${result?.vulnerabilities?.length || 0})`
               : tab === 'logs' ? `Logs (${logs.length})`
-              : tab === 'ports' ? `Portlar (${result?.open_ports?.length || 0})`
+              : tab === 'ports' ? `Ports (${result?.open_ports?.length || 0})`
               : `Subdomains (${result?.subdomains?.length || 0})`}
           </button>
         ))}
@@ -256,7 +252,6 @@ export default function Results({ scanId, onResult }) {
       {/* Vulns tab */}
       {activeTab === 'vulns' && (
         <div>
-          {/* Severity filter */}
           <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
             {['all', 'critical', 'high', 'medium', 'low', 'info'].map(s => (
               <button key={s} onClick={() => setSevFilter(s)} style={{
@@ -266,7 +261,7 @@ export default function Results({ scanId, onResult }) {
                 color: sevFilter === s ? '#38bdf8' : '#64748b',
                 cursor: 'pointer', fontSize: '0.8rem',
               }}>
-                {s === 'all' ? 'Hamısı' : s}
+                {s === 'all' ? 'All' : s}
                 {s !== 'all' && bySev[s] > 0 && (
                   <span style={{ marginLeft: 4, opacity: 0.7 }}>({bySev[s]})</span>
                 )}
@@ -276,7 +271,7 @@ export default function Results({ scanId, onResult }) {
 
           {filteredVulns.length === 0 ? (
             <div style={{ textAlign: 'center', color: '#475569', padding: '3rem' }}>
-              {status === 'running' ? '⏳ Scan davam edir...' : '✅ Bu kateqoriyada vulnerability tapılmadı'}
+              {status === 'running' ? '⏳ Scan in progress...' : '✅ No vulnerabilities in this category'}
             </div>
           ) : (
             filteredVulns.map((v, i) => <VulnCard key={i} vuln={v} />)
@@ -341,7 +336,7 @@ export default function Results({ scanId, onResult }) {
           </table>
           {!result?.open_ports?.length && (
             <div style={{ textAlign: 'center', padding: '2rem', color: '#475569' }}>
-              Açıq port tapılmadı
+              No open ports found
             </div>
           )}
         </div>
@@ -356,7 +351,7 @@ export default function Results({ scanId, onResult }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
             <thead>
               <tr style={{ background: '#0f1117' }}>
-                {['Subdomain', 'IP', 'Status', 'Texnologiyalar'].map(h => (
+                {['Subdomain', 'IP', 'Status', 'Technologies'].map(h => (
                   <th key={h} style={{
                     padding: '0.7rem 1rem', textAlign: 'left',
                     color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase',
@@ -386,7 +381,7 @@ export default function Results({ scanId, onResult }) {
           </table>
           {!result?.subdomains?.length && (
             <div style={{ textAlign: 'center', padding: '2rem', color: '#475569' }}>
-              Subdomain tapılmadı
+              No subdomains found
             </div>
           )}
         </div>

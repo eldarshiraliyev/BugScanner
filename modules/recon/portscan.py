@@ -1,5 +1,5 @@
 """
-Port Scanner — asyncio-based TCP connect scan + nmap service detection
+Port Scanner — asyncio-based TCP connect scan + banner grabbing
 """
 
 import asyncio
@@ -11,7 +11,7 @@ from core.models import PortInfo
 
 console = Console()
 
-# Port → Service mapping (fallback nmap olmadıqda)
+# Port → Service mapping (fallback when nmap unavailable)
 SERVICE_MAP = {
     21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns",
     80: "http", 110: "pop3", 111: "rpcbind", 135: "msrpc",
@@ -22,19 +22,19 @@ SERVICE_MAP = {
     9200: "elasticsearch", 27017: "mongodb",
 }
 
-# Port üçün potensial vulnerability hints
+# Potential vulnerabilities per port
 PORT_VULN_HINTS = {
-    21:    "FTP — Anonymous login, plaintext credentials yoxla",
-    22:    "SSH — Brute force, outdated version yoxla",
-    23:    "Telnet — Plaintext protocol, istifadəsi təhlükəli",
-    25:    "SMTP — Open relay, user enumeration yoxla",
-    3306:  "MySQL — Remote access, weak credentials yoxla",
-    3389:  "RDP — BlueKeep, brute force yoxla",
-    5432:  "PostgreSQL — Remote access, weak credentials yoxla",
-    5900:  "VNC — Authentication bypass, weak password yoxla",
-    6379:  "Redis — Unauthenticated access yoxla (CVE-2022-0543)",
-    9200:  "Elasticsearch — Unauthenticated access, data exposure yoxla",
-    27017: "MongoDB — Unauthenticated access yoxla",
+    21:    "FTP — check anonymous login & plaintext credentials",
+    22:    "SSH — brute force & outdated version check",
+    23:    "Telnet — plaintext protocol, insecure",
+    25:    "SMTP — open relay & user enumeration",
+    3306:  "MySQL — remote access & weak credentials",
+    3389:  "RDP — BlueKeep & brute force",
+    5432:  "PostgreSQL — remote access & weak credentials",
+    5900:  "VNC — auth bypass & weak password",
+    6379:  "Redis — unauthenticated access (CVE-2022-0543)",
+    9200:  "Elasticsearch — unauthenticated data exposure",
+    27017: "MongoDB — unauthenticated access",
 }
 
 
@@ -44,11 +44,11 @@ class PortScanner:
         self.max_concurrent = max_concurrent
 
     async def _tcp_connect(self, host: str, port: int) -> bool:
-        """Sadə TCP connect scan"""
+        """Simple TCP connect scan."""
         try:
             _, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port),
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             writer.close()
             try:
@@ -60,14 +60,13 @@ class PortScanner:
             return False
 
     async def _grab_banner(self, host: str, port: int) -> Optional[str]:
-        """Service banner al"""
+        """Fetch service banner."""
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port),
-                timeout=2.0
+                timeout=2.0,
             )
-            # HTTP portları üçün GET göndər
-            if port in [80, 8080, 8888]:
+            if port in (80, 8080, 8888):
                 writer.write(b"HEAD / HTTP/1.0\r\n\r\n")
                 await writer.drain()
 
@@ -78,8 +77,9 @@ class PortScanner:
         except Exception:
             return None
 
-    async def _scan_port(self, host: str, port: int,
-                         semaphore: asyncio.Semaphore) -> Optional[PortInfo]:
+    async def _scan_port(
+        self, host: str, port: int, semaphore: asyncio.Semaphore
+    ) -> Optional[PortInfo]:
         async with semaphore:
             is_open = await self._tcp_connect(host, port)
             if not is_open:
@@ -88,7 +88,6 @@ class PortScanner:
             service = SERVICE_MAP.get(port, "unknown")
             banner = await self._grab_banner(host, port)
 
-            # Banner-dən version cıxarmağa çalış
             version = None
             if banner:
                 lines = banner.split("\n")
@@ -103,30 +102,41 @@ class PortScanner:
                 banner=banner,
             )
 
-    async def scan(self, host: str, ports: list[int] = None,
-                   mode: str = "common") -> list[PortInfo]:
+    def _resolve_ports(self, mode: str) -> list[int]:
+        if mode == "full":
+            return list(range(1, 65536))
+        if mode == "extended":
+            return sorted(set(SERVICE_MAP.keys()) | {8080, 8443, 8888, 9200, 27017})
+        return sorted(SERVICE_MAP.keys())
+
+    async def scan(
+        self,
+        host: str,
+        ports: list[int] = None,
+        mode: str = "common",
+        chunk_size: int = 5000,
+    ) -> list[PortInfo]:
         """
-        mode: "common" (19 port), "extended" (25 port), "full" (1-65535)
+        mode: "common" (~19 ports), "extended" (~30 ports), "full" (1-65535)
+
+        Uses chunked processing to keep memory bounded even for full scans —
+        never creates more than `chunk_size` coroutines at once.
         """
         if ports is None:
-            if mode == "full":
-                ports = list(range(1, 65536))
-            elif mode == "extended":
-                ports = list(SERVICE_MAP.keys()) + [8080, 8443, 8888]
-            else:  # common
-                ports = list(SERVICE_MAP.keys())
+            ports = self._resolve_ports(mode)
 
-        # IP resolve et
         try:
             ip = socket.gethostbyname(host)
         except socket.gaierror:
-            console.print(f"[red]❌ {host} resolve edilə bilmədi[/red]")
+            console.print(f"[red]❌ Could not resolve {host}[/red]")
             return []
 
-        console.print(f"\n[bold cyan]🔌 Port scan:[/bold cyan] {host} ({ip}) — {len(ports)} port")
+        console.print(
+            f"\n[bold cyan]🔌 Port scan:[/bold cyan] {host} ({ip}) — {len(ports)} ports"
+        )
 
         semaphore = asyncio.Semaphore(self.max_concurrent)
-        open_ports = []
+        open_ports: list[PortInfo] = []
 
         with Progress(
             SpinnerColumn(),
@@ -135,29 +145,39 @@ class PortScanner:
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             console=console,
         ) as progress:
-            task = progress.add_task(f"[cyan]Port scan...[/cyan]", total=len(ports))
+            task = progress.add_task("[cyan]Port scan...[/cyan]", total=len(ports))
 
-            async def scan_with_progress(port):
-                result = await self._scan_port(ip, port, semaphore)
-                progress.advance(task)
-                return result
+            # Chunked processing — avoids spawning 65K coroutines at once
+            for i in range(0, len(ports), chunk_size):
+                chunk = ports[i:i + chunk_size]
 
-            results = await asyncio.gather(
-                *[scan_with_progress(p) for p in ports],
-                return_exceptions=True
+                async def scan_one(port):
+                    try:
+                        return await self._scan_port(ip, port, semaphore)
+                    finally:
+                        progress.advance(task)
+
+                results = await asyncio.gather(
+                    *[scan_one(p) for p in chunk],
+                    return_exceptions=True,
+                )
+                for r in results:
+                    if isinstance(r, PortInfo):
+                        open_ports.append(r)
+
+        # Print results after progress bar completes
+        open_ports.sort(key=lambda p: p.port)
+        for r in open_ports:
+            hint = PORT_VULN_HINTS.get(r.port, "")
+            hint_str = f" [dim]→ {hint}[/dim]" if hint else ""
+            console.print(
+                f"  [green]OPEN[/green] {r.port}/tcp  "
+                f"[yellow]{r.service}[/yellow]"
+                f"{' — ' + r.version[:50] if r.version else ''}"
+                f"{hint_str}"
             )
 
-        for r in results:
-            if isinstance(r, PortInfo):
-                open_ports.append(r)
-                hint = PORT_VULN_HINTS.get(r.port, "")
-                hint_str = f" [dim]→ {hint}[/dim]" if hint else ""
-                console.print(
-                    f"  [green]OPEN[/green] {r.port}/tcp  "
-                    f"[yellow]{r.service}[/yellow]"
-                    f"{' — ' + r.version[:50] if r.version else ''}"
-                    f"{hint_str}"
-                )
-
-        console.print(f"[bold green]  Port skanı tamamlandı: {len(open_ports)} açıq port[/bold green]")
+        console.print(
+            f"[bold green]  Port scan complete: {len(open_ports)} open ports[/bold green]"
+        )
         return open_ports

@@ -1,41 +1,40 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-
 # Virtual environment
 venv/
-.venv/
 env/
+.venv/
 
-# Environment / secrets
-.env
-.env.*
-!.env.example
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Reports (generated)
+reports/*.html
+reports/*.json
+!reports/template.html
+!reports/_styles.html
+!reports/_scripts.html
 
 # IDE
 .vscode/
 .idea/
+*.swp
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Environment
+.env
+.env.local
 
-# Reports / generated files — generated scan outputs
-reports/*.json
-reports/*.html.bak
-output/
-!reports/template.html
-
-# Test artifacts
-*.tmp
-*.bak
-
-# Secrets / credentials
-*.pem
-*.key
-credentials.json
-secrets.json
+# Node (frontend)
+frontend/node_modules/
+frontend/dist/

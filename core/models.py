@@ -1,5 +1,5 @@
 """
-Data modelləri — Vulnerability, ScanResult, SeverityRating
+Data models — Vulnerability, ScanResult, Severity
 """
 
 from dataclasses import dataclass, field
@@ -58,26 +58,25 @@ def calculate_severity(cvss_score: float) -> Severity:
         return Severity.MEDIUM
     elif cvss_score >= 1.0:
         return Severity.LOW
-    else:
-        return Severity.INFO
+    return Severity.INFO
 
 
 @dataclass
 class Vulnerability:
-    vuln_type: str                          # "XSS", "SQLi", "CORS", vs.
-    url: str                                # Tapıldığı URL
+    vuln_type: str                          # "XSS", "SQLi", "CORS", etc.
+    url: str                                # Affected URL
     severity: Severity
     cvss_score: float
     title: str
     description: str
-    evidence: str                           # Nə gördük (response snippet)
-    exploitation: str                       # Necə istismar etmək olar
-    remediation: str                        # Necə düzəltmək olar
-    parameter: Optional[str] = None         # Hansı parameter
+    evidence: str                           # What we observed (response snippet)
+    exploitation: str                       # How to exploit
+    remediation: str                        # How to fix
+    parameter: Optional[str] = None         # Affected parameter
     method: Optional[str] = "GET"
-    payload_used: Optional[str] = None      # Hansı payload işlədi
+    payload_used: Optional[str] = None      # Successful payload
     curl_poc: Optional[str] = None          # curl PoC command
-    cwe_id: Optional[str] = None            # CWE-79, CWE-89, vs.
+    cwe_id: Optional[str] = None            # CWE-79, CWE-89, etc.
     references: list[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.now)
 
@@ -107,7 +106,7 @@ class PortInfo:
     port: int
     protocol: str           # tcp/udp
     state: str              # open/closed/filtered
-    service: str            # http, ssh, mysql, vs.
+    service: str            # http, ssh, mysql, etc.
     version: Optional[str] = None
     banner: Optional[str] = None
     vulnerabilities: list[Vulnerability] = field(default_factory=list)
@@ -129,16 +128,18 @@ class ScanResult:
     start_time: datetime = field(default_factory=datetime.now)
     end_time: Optional[datetime] = None
 
-    # Recon nəticələri
+    # Recon results
     subdomains: list[SubdomainInfo] = field(default_factory=list)
     technologies: list[str] = field(default_factory=list)
     open_ports: list[PortInfo] = field(default_factory=list)
     endpoints: list[str] = field(default_factory=list)
 
-    # Vulnerability nəticələri
+    # Vulnerability results
     vulnerabilities: list[Vulnerability] = field(default_factory=list)
 
-    # Statistika
+    # Statistics
+    false_positives_filtered: int = 0    # ← NEW: was missing before
+
     @property
     def vuln_count_by_severity(self) -> dict:
         counts = {s.value: 0 for s in Severity}
@@ -148,7 +149,7 @@ class ScanResult:
 
     @property
     def risk_score(self) -> float:
-        """Ümumi risk skoru — weighted average"""
+        """Overall risk score — weighted average."""
         if not self.vulnerabilities:
             return 0.0
         weights = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
@@ -166,6 +167,7 @@ class ScanResult:
                 "open_ports": len(self.open_ports),
                 "endpoints_found": len(self.endpoints),
                 "total_vulnerabilities": len(self.vulnerabilities),
+                "false_positives_filtered": self.false_positives_filtered,
                 "by_severity": self.vuln_count_by_severity,
                 "risk_score": self.risk_score,
             },

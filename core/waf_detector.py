@@ -5,11 +5,12 @@ WAF Detection + Evasion Engine
 import asyncio
 import random
 import re
+import httpx
 from rich.console import Console
 
 console = Console()
 
-# Bilinen WAF imzaları
+# Known WAF signatures
 WAF_SIGNATURES = {
     "Cloudflare": [
         "__cfduid", "cf-ray", "cloudflare", "cf-cache-status",
@@ -41,7 +42,7 @@ WAF_SIGNATURES = {
     ],
 }
 
-# WAF-a görə evasion strategiyaları
+# Evasion strategies per WAF
 WAF_EVASION = {
     "Cloudflare": {
         "delay": 2.0,
@@ -69,7 +70,7 @@ WAF_EVASION = {
     },
 }
 
-# Real browser User-Agent-ları
+# Realistic browser User-Agents
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
@@ -79,7 +80,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
 ]
 
-# WAF bypass header-ləri
+# WAF bypass headers
 BYPASS_HEADERS = [
     {"X-Forwarded-For": "127.0.0.1"},
     {"X-Real-IP": "127.0.0.1"},
@@ -98,7 +99,7 @@ class WAFDetector:
         self.evasion_config = WAF_EVASION["default"]
 
     async def detect(self, url: str) -> dict:
-        """WAF aşkar et və evasion config qaytar"""
+        """Detect WAF and return evasion configuration."""
         result = {
             "waf": None,
             "confidence": 0,
@@ -110,7 +111,6 @@ class WAFDetector:
         if not response:
             return result
 
-        # Headers + body yoxla
         headers_str = " ".join(
             f"{k} {v}" for k, v in response.headers.items()
         ).lower()
@@ -118,7 +118,6 @@ class WAFDetector:
         cookies_str = str(response.cookies).lower()
         combined = headers_str + body_lower + cookies_str
 
-        # Hər WAF imzasını yoxla
         for waf_name, signatures in WAF_SIGNATURES.items():
             hits = sum(1 for sig in signatures if sig.lower() in combined)
             if hits > 0:
@@ -130,15 +129,14 @@ class WAFDetector:
                         waf_name, WAF_EVASION["default"]
                     )
 
-        # 403/406/429 statusu
-        if response.status_code in [403, 406, 429, 503]:
+        if response.status_code in (403, 406, 429, 503):
             result["blocked"] = True
 
         if result["waf"]:
             self.detected_waf = result["waf"]
             self.evasion_config = result["evasion"]
             console.print(
-                f"  [yellow]⚠️  WAF aşkar edildi:[/yellow] "
+                f"  [yellow]⚠️  WAF detected:[/yellow] "
                 f"[bold]{result['waf']}[/bold] "
                 f"(confidence: {result['confidence']}%)"
             )
@@ -148,7 +146,7 @@ class WAFDetector:
                 f"UA rotation={result['evasion']['rotate_ua']}[/dim]"
             )
         else:
-            console.print("  [green]✓ WAF aşkar edilmədi[/green]")
+            console.print("  [green]✓ No WAF detected[/green]")
 
         return result
 

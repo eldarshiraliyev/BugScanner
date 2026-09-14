@@ -1,5 +1,5 @@
 """
-Ana Scanner Orchestrator — v2.0
+Main Scanner Orchestrator — v2.0
 WAF Detection + FP Validation + Business Logic + Auth
 """
 
@@ -35,11 +35,14 @@ from modules.vulns.business_logic import BusinessLogicScanner
 
 console = Console()
 
-CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
+# settings.yaml sits at the project root; fall back to legacy config/ path
+CONFIG_PATH = Path(__file__).parent.parent / "settings.yaml"
+_LEGACY_CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
 
 
 def load_config() -> dict:
-    with open(CONFIG_PATH) as f:
+    path = CONFIG_PATH if CONFIG_PATH.exists() else _LEGACY_CONFIG_PATH
+    with open(path) as f:
         return yaml.safe_load(f)
 
 
@@ -52,6 +55,7 @@ class BugScanner:
         proxy: str = None,
         validate_fp: bool = True,
         run_business_logic: bool = False,
+        run_nuclei: bool = True,
     ):
         self.config = config or load_config()
         self.cookies = cookies or {}
@@ -59,6 +63,8 @@ class BugScanner:
         self.proxy = proxy
         self.validate_fp = validate_fp
         self.run_business_logic = run_business_logic
+        # Respect both the CLI flag and the global config toggle
+        self.run_nuclei = run_nuclei and self.config.get("nuclei", {}).get("enabled", True)
 
         rl = self.config["rate_limiting"]
         sc = self.config["scanning"]
@@ -87,45 +93,37 @@ class BugScanner:
             if self.cookies or self.headers
             else "[dim]Unauthenticated[/dim]"
         )
-        bl_status = (
-            "[green]ON[/green]"
-            if self.run_business_logic
-            else "[dim]OFF[/dim]"
-        )
-        fp_status = (
-            "[green]ON[/green]"
-            if self.validate_fp
-            else "[dim]OFF[/dim]"
-        )
+        bl_status = "[green]ON[/green]" if self.run_business_logic else "[dim]OFF[/dim]"
+        fp_status = "[green]ON[/green]" if self.validate_fp else "[dim]OFF[/dim]"
+        nuclei_status = "[green]ON[/green]" if self.run_nuclei else "[dim]OFF[/dim]"
+
         console.print(Panel.fit(
             f"[bold cyan]BugScanner[/bold cyan] [dim]v2.0[/dim]\n"
             f"[bold]Target:[/bold]         {target}\n"
             f"[bold]Auth:[/bold]           {auth_status}\n"
             f"[bold]Business Logic:[/bold] {bl_status}\n"
             f"[bold]FP Validation:[/bold]  {fp_status}\n"
-            f"[bold]Proxy:[/bold]          {self.proxy or 'yoxdur'}\n"
+            f"[bold]Nuclei:[/bold]         {nuclei_status}\n"
+            f"[bold]Proxy:[/bold]          {self.proxy or 'none'}\n"
             f"[bold]Time:[/bold]           {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             border_style="cyan"
         ))
 
     def _print_summary(self, result: ScanResult):
         table = Table(
-            title="📊 Scan Nəticəsi",
+            title="📊 Scan Summary",
             box=box.ROUNDED,
             border_style="cyan"
         )
-        table.add_column("Kateqoriya", style="bold")
-        table.add_column("Sayı", justify="right")
+        table.add_column("Category", style="bold")
+        table.add_column("Count", justify="right")
 
-        table.add_row("Subdomains",    str(len(result.subdomains)))
-        table.add_row("Açıq portlar", str(len(result.open_ports)))
-        table.add_row("Endpoints",    str(len(result.endpoints)))
-        table.add_row(
-            "Vulnerabilities",
-            str(len(result.vulnerabilities))
-        )
+        table.add_row("Subdomains",     str(len(result.subdomains)))
+        table.add_row("Open ports",     str(len(result.open_ports)))
+        table.add_row("Endpoints",      str(len(result.endpoints)))
+        table.add_row("Vulnerabilities", str(len(result.vulnerabilities)))
 
-        if hasattr(result, "false_positives_filtered"):
+        if result.false_positives_filtered:
             table.add_row(
                 "[dim]FP filtered[/dim]",
                 f"[dim]{result.false_positives_filtered}[/dim]"
@@ -143,43 +141,31 @@ class BugScanner:
         for sev, count in result.vuln_count_by_severity.items():
             if count > 0:
                 c = colors.get(sev, "")
-                table.add_row(
-                    f"  [{c}]{sev.upper()}[/{c}]",
-                    f"[{c}]{count}[/{c}]"
-                )
+                table.add_row(f"  [{c}]{sev.upper()}[/{c}]", f"[{c}]{count}[/{c}]")
 
-        table.add_row(
-            "[bold]Risk Skoru[/bold]",
-            f"[bold]{result.risk_score}/10[/bold]"
-        )
+        table.add_row("[bold]Risk Score[/bold]", f"[bold]{result.risk_score}/10[/bold]")
         console.print(table)
 
-    async def _apply_waf_evasion(
-        self,
-        http: HttpClient,
-        base_url: str
-    ) -> dict:
-        """WAF aşkar et, rate limiter-i tənzimlə"""
-        console.print(
-            "\n[bold cyan]🛡️  WAF Detection...[/bold cyan]"
-        )
+    async def _apply_waf_evasion(self, http: HttpClient, base_url: str) -> dict:
+        """Detect WAF and tune the rate limiter accordingly."""
+        console.print("\n[bold cyan]🛡️  WAF Detection...[/bold cyan]")
         detector = WAFDetector(http)
         waf_info = await detector.detect(base_url)
 
         if waf_info["waf"]:
             evasion = waf_info["evasion"]
             import tldextract
-            from core.rate_limiter import TokenBucket
             ext = tldextract.extract(base_url)
             domain = f"{ext.domain}.{ext.suffix}"
-            self.rate_limiter._buckets.clear()
-            self.rate_limiter._buckets[domain] = TokenBucket(
-                rps=float(evasion["rps"])
-            )
+
+            # Use the existing public-ish accessor instead of mutating
+            # the private bucket dict directly.
+            bucket = self.rate_limiter._get_bucket(domain)
+            bucket.rps = max(self.rate_limiter.min_rps, float(evasion["rps"]))
+
             console.print(
-                f"  [yellow]Evasion aktiv:[/yellow] "
-                f"RPS→{evasion['rps']}, "
-                f"delay→{evasion['delay']}s"
+                f"  [yellow]Evasion active:[/yellow] "
+                f"RPS→{evasion['rps']}, delay→{evasion['delay']}s"
             )
 
         return waf_info
@@ -207,44 +193,29 @@ class BugScanner:
         ext = tldextract.extract(base_url)
         domain = f"{ext.domain}.{ext.suffix}"
 
-        async with HttpClient(
-            self.rate_limiter, **self.http_config
-        ) as http:
+        async with HttpClient(self.rate_limiter, **self.http_config) as http:
 
             # ── WAF Detection ─────────────────────────────
-            waf_info = await self._apply_waf_evasion(http, base_url)
+            await self._apply_waf_evasion(http, base_url)
 
             # ── RECON ─────────────────────────────────────
             if "recon" in modes:
-                console.print(
-                    Panel("[bold]RECON FAZA[/bold]",
-                          border_style="blue")
-                )
+                console.print(Panel("[bold]RECON PHASE[/bold]", border_style="blue"))
 
-                # Fingerprint
-                console.print(
-                    "\n[bold cyan]🔎 Fingerprinting...[/bold cyan]"
-                )
+                console.print("\n[bold cyan]🔎 Fingerprinting...[/bold cyan]")
                 fp = TechFingerprinter(http)
                 techs, header_vulns = await fp.fingerprint(base_url)
                 result.technologies = techs
                 result.vulnerabilities.extend(header_vulns)
 
-                # Subdomain
                 if not skip_subdomains:
                     sub_scanner = SubdomainScanner(http)
                     result.subdomains = await sub_scanner.scan(domain)
 
-                # Port scan
                 port_scanner = PortScanner()
-                result.open_ports = await port_scanner.scan(
-                    domain, mode=port_mode
-                )
+                result.open_ports = await port_scanner.scan(domain, mode=port_mode)
 
-                # Endpoint discovery
-                console.print(
-                    "\n[bold cyan]🗂  Endpoint Discovery...[/bold cyan]"
-                )
+                console.print("\n[bold cyan]🗂  Endpoint Discovery...[/bold cyan]")
                 disc = DiscoveryScanner(http)
                 endpoints, disc_vulns = await disc.scan(base_url)
                 result.endpoints = endpoints
@@ -252,10 +223,7 @@ class BugScanner:
 
             # ── VULNS ─────────────────────────────────────
             if "vulns" in modes:
-                console.print(
-                    Panel("[bold]VULNERABILITY SCAN FAZA[/bold]",
-                          border_style="red")
-                )
+                console.print(Panel("[bold]VULNERABILITY SCAN PHASE[/bold]", border_style="red"))
 
                 xss      = XSSScanner(http)
                 sqli     = SQLiScanner(http)
@@ -266,90 +234,55 @@ class BugScanner:
                 idor     = IDORScanner(http)
                 disc_sc  = DisclosureScanner(http)
 
-                # Ana URL scan
-                console.print(
-                    "\n[bold cyan]📂 Information Disclosure...[/bold cyan]"
-                )
-                result.vulnerabilities.extend(
-                    await disc_sc.scan(base_url)
-                )
+                console.print("\n[bold cyan]📂 Information Disclosure...[/bold cyan]")
+                result.vulnerabilities.extend(await disc_sc.scan(base_url))
 
-                console.print(
-                    "\n[bold cyan]🌐 CORS...[/bold cyan]"
-                )
-                result.vulnerabilities.extend(
-                    await cors.scan(base_url)
-                )
+                console.print("\n[bold cyan]🌐 CORS...[/bold cyan]")
+                result.vulnerabilities.extend(await cors.scan(base_url))
 
-                console.print(
-                    "\n[bold cyan]⚡ XSS...[/bold cyan]"
-                )
-                result.vulnerabilities.extend(
-                    await xss.scan(base_url)
-                )
+                console.print("\n[bold cyan]⚡ XSS...[/bold cyan]")
+                result.vulnerabilities.extend(await xss.scan(base_url))
 
-                console.print(
-                    "\n[bold cyan]💉 SQL Injection...[/bold cyan]"
-                )
-                result.vulnerabilities.extend(
-                    await sqli.scan(base_url)
-                )
+                console.print("\n[bold cyan]💉 SQL Injection...[/bold cyan]")
+                result.vulnerabilities.extend(await sqli.scan(base_url))
 
-                console.print(
-                    "\n[bold cyan]🔄 SSRF...[/bold cyan]"
-                )
-                result.vulnerabilities.extend(
-                    await ssrf.scan(base_url)
-                )
+                console.print("\n[bold cyan]🔄 SSRF...[/bold cyan]")
+                result.vulnerabilities.extend(await ssrf.scan(base_url))
 
-                console.print(
-                    "\n[bold cyan]↪️  Open Redirect...[/bold cyan]"
-                )
-                result.vulnerabilities.extend(
-                    await redirect.scan(base_url)
-                )
+                console.print("\n[bold cyan]↪️  Open Redirect...[/bold cyan]")
+                result.vulnerabilities.extend(await redirect.scan(base_url))
 
-                console.print(
-                    "\n[bold cyan]🔑 JWT...[/bold cyan]"
-                )
-                result.vulnerabilities.extend(
-                    await jwt.scan(base_url)
-                )
+                console.print("\n[bold cyan]🔑 JWT...[/bold cyan]")
+                result.vulnerabilities.extend(await jwt.scan(base_url))
 
-                console.print(
-                    "\n[bold cyan]🆔 IDOR...[/bold cyan]"
-                )
-                result.vulnerabilities.extend(
-                    await idor.scan(base_url)
-                )
+                console.print("\n[bold cyan]🆔 IDOR...[/bold cyan]")
+                result.vulnerabilities.extend(await idor.scan(base_url))
 
-                # Discovered endpoints üçün
-                console.print(
-                    "\n[bold cyan]🔁 Endpoint scan...[/bold cyan]"
-                )
-                for ep_url in result.endpoints[:15]:
-                    ep_results = await asyncio.gather(
-                        xss.scan(ep_url),
-                        sqli.scan(ep_url),
-                        cors.scan(ep_url),
-                        idor.scan(ep_url),
-                        return_exceptions=True
-                    )
-                    for r in ep_results:
-                        if isinstance(r, list):
-                            result.vulnerabilities.extend(r)
+                # Discovered endpoints
+                if result.endpoints:
+                    console.print("\n[bold cyan]🔁 Endpoint scan...[/bold cyan]")
+                    for ep_url in result.endpoints[:15]:
+                        ep_results = await asyncio.gather(
+                            xss.scan(ep_url),
+                            sqli.scan(ep_url),
+                            cors.scan(ep_url),
+                            idor.scan(ep_url),
+                            return_exceptions=True,
+                        )
+                        for r in ep_results:
+                            if isinstance(r, list):
+                                result.vulnerabilities.extend(r)
 
-                # Subdomains üçün
-                console.print(
-                    "\n[bold cyan]🌐 Subdomain vuln scan...[/bold cyan]"
-                )
-                for sub in result.subdomains[:10]:
-                    if sub.status and sub.status < 400:
+                # Live subdomain vuln scan
+                live_subs = [s for s in result.subdomains if s.status and s.status < 400]
+                if live_subs:
+                    console.print("\n[bold cyan]🌐 Subdomain vuln scan...[/bold cyan]")
+                    for sub in live_subs[:10]:
                         sub_url = f"https://{sub.subdomain}"
                         sub_results = await asyncio.gather(
                             cors.scan(sub_url),
                             disc_sc.scan(sub_url),
-                            return_exceptions=True
+                            return_exceptions=True,
                         )
                         for r in sub_results:
                             if isinstance(r, list):
@@ -358,27 +291,20 @@ class BugScanner:
 
                 # Business Logic
                 if self.run_business_logic:
-                    console.print(
-                        "\n[bold cyan]🧠 Business Logic...[/bold cyan]"
-                    )
+                    console.print("\n[bold cyan]🧠 Business Logic...[/bold cyan]")
                     bl = BusinessLogicScanner(http)
-                    bl_vulns = await bl.scan(base_url)
-                    result.vulnerabilities.extend(bl_vulns)
+                    result.vulnerabilities.extend(await bl.scan(base_url))
 
                 # Nuclei
-                console.print(
-                    "\n[bold cyan]☢️  Nuclei...[/bold cyan]"
-                )
-                nuclei = NucleiWrapper()
-                nuclei_vulns = await nuclei.scan(base_url)
-                result.vulnerabilities.extend(nuclei_vulns)
+                if self.run_nuclei:
+                    console.print("\n[bold cyan]☢️  Nuclei...[/bold cyan]")
+                    nuclei = NucleiWrapper()
+                    result.vulnerabilities.extend(await nuclei.scan(base_url))
 
                 # False-Positive Validation
                 if self.validate_fp and result.vulnerabilities:
                     validator = FalsePositiveValidator(http)
-                    confirmed, filtered = await validator.validate_all(
-                        result.vulnerabilities
-                    )
+                    confirmed, filtered = await validator.validate_all(result.vulnerabilities)
                     result.vulnerabilities = confirmed
                     result.false_positives_filtered = len(filtered)
 

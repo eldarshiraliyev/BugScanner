@@ -1,175 +1,1532 @@
 <!DOCTYPE html>
-<html lang="az">
+<html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BugScanner Report — {{ result.target }}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: #0d1117;
-      color: #c9d1d9;
-      font-family: 'Segoe UI', monospace;
-      padding: 2rem;
-      line-height: 1.6;
-    }
-    h1 { color: #58a6ff; margin-bottom: 0.5rem; }
-    h3 { margin-bottom: 0.4rem; }
-    .meta { color: #8b949e; margin-bottom: 2rem; font-size: 0.9rem; }
-    .meta span { margin-right: 2rem; }
-    .summary {
-      display: flex; gap: 1rem; flex-wrap: wrap;
-      margin-bottom: 2rem;
-    }
-    .stat {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 0.8rem 1.2rem;
-      text-align: center;
-      min-width: 100px;
-    }
-    .stat .num { font-size: 1.8rem; font-weight: bold; color: #58a6ff; }
-    .stat .lbl { font-size: 0.75rem; color: #8b949e; }
-    .vuln {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-left: 4px solid #30363d;
-      border-radius: 6px;
-      padding: 1rem 1.2rem;
-      margin-bottom: 1rem;
-    }
-    .vuln.CRITICAL { border-left-color: #da3633; }
-    .vuln.HIGH     { border-left-color: #f85149; }
-    .vuln.MEDIUM   { border-left-color: #e3b341; }
-    .vuln.LOW      { border-left-color: #3fb950; }
-    .vuln.INFO     { border-left-color: #58a6ff; }
-    .badge {
-      display: inline-block;
-      font-size: 0.72rem;
-      padding: 2px 8px;
-      border-radius: 12px;
-      margin-right: 6px;
-      font-weight: bold;
-    }
-    .badge.CRITICAL { background:#da3633; color:#fff; }
-    .badge.HIGH     { background:#f85149; color:#fff; }
-    .badge.MEDIUM   { background:#e3b341; color:#000; }
-    .badge.LOW      { background:#3fb950; color:#000; }
-    .badge.INFO     { background:#58a6ff; color:#000; }
-    .url { font-size: 0.82rem; color: #8b949e; word-break: break-all; margin: 0.4rem 0; }
-    .desc { margin: 0.5rem 0; font-size: 0.92rem; }
-    details { margin-top: 0.6rem; }
-    summary {
-      cursor: pointer;
-      color: #58a6ff;
-      font-size: 0.85rem;
-      user-select: none;
-    }
-    pre {
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 4px;
-      padding: 0.8rem;
-      margin-top: 0.4rem;
-      font-size: 0.82rem;
-      white-space: pre-wrap;
-      word-break: break-all;
-      color: #c9d1d9;
-    }
-    hr { border: none; border-top: 1px solid #30363d; margin: 2rem 0; }
-    .no-vulns { color: #3fb950; font-size: 1.1rem; margin-top: 1rem; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BugScanner Report · {{ result.target }}</title>
+
+{% raw %}
+<style>
+/* ═══════════════════════════════════════════════════════════
+   BugScanner 2026 — Modern Report Design System
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* Color tokens */
+  --bg-0: #08090d;
+  --bg-1: #0d0f15;
+  --bg-2: #131620;
+  --bg-3: #1a1e2b;
+  --surface: rgba(22, 26, 38, 0.72);
+  --surface-hi: rgba(30, 36, 52, 0.85);
+  --border: rgba(148, 163, 184, 0.12);
+  --border-hi: rgba(148, 163, 184, 0.22);
+
+  --text-0: #f1f5f9;
+  --text-1: #cbd5e1;
+  --text-2: #94a3b8;
+  --text-3: #64748b;
+  --text-4: #475569;
+
+  --accent: #22d3ee;
+  --accent-2: #38bdf8;
+  --accent-glow: rgba(34, 211, 238, 0.15);
+
+  --crit: #f43f5e;
+  --crit-bg: rgba(244, 63, 94, 0.12);
+  --high: #fb923c;
+  --high-bg: rgba(251, 146, 60, 0.12);
+  --med: #facc15;
+  --med-bg: rgba(250, 204, 21, 0.12);
+  --low: #60a5fa;
+  --low-bg: rgba(96, 165, 250, 0.12);
+  --info: #94a3b8;
+  --info-bg: rgba(148, 163, 184, 0.12);
+  --ok: #10b981;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+
+  --radius: 14px;
+  --radius-sm: 8px;
+  --radius-lg: 20px;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace;
+}
+
+[data-theme="light"] {
+  --bg-0: #f8fafc;
+  --bg-1: #f1f5f9;
+  --bg-2: #e2e8f0;
+  --bg-3: #cbd5e1;
+  --surface: rgba(255, 255, 255, 0.85);
+  --surface-hi: rgba(255, 255, 255, 1);
+  --border: rgba(15, 23, 42, 0.08);
+  --border-hi: rgba(15, 23, 42, 0.15);
+
+  --text-0: #0f172a;
+  --text-1: #1e293b;
+  --text-2: #475569;
+  --text-3: #64748b;
+  --text-4: #94a3b8;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 16px 48px rgba(15, 23, 42, 0.12);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-0);
+  color: var(--text-1);
+  line-height: 1.6;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Ambient gradient background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(34, 211, 238, 0.08), transparent 60%),
+    radial-gradient(900px 500px at 90% 10%, rgba(139, 92, 246, 0.06), transparent 60%),
+    radial-gradient(800px 800px at 50% 100%, rgba(244, 63, 94, 0.04), transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ─── Layout ──────────────────────────────────────────────── */
+.app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  max-width: 1440px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 2rem 1.25rem;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+.main {
+  padding: 2rem 2.5rem 4rem;
+  max-width: 1100px;
+}
+
+/* ─── Sidebar ────────────────────────────────────────────── */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-0);
+  letter-spacing: -0.01em;
+}
+
+.brand-logo {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--accent), #8b5cf6);
+  border-radius: 9px;
+  font-size: 1rem;
+  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.25);
+}
+
+.brand-ver {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 5px;
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-weight: 600;
+  margin-left: 0.15rem;
+}
+
+.nav-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-4);
+  margin-bottom: 0.5rem;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 9px;
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.nav a:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
+  border-color: var(--border);
+}
+
+.nav a.active {
+  background: var(--surface-hi);
+  color: var(--text-0);
+  border-color: var(--border-hi);
+  box-shadow: var(--shadow-sm);
+}
+
+.nav a .count {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 5px;
+  background: var(--bg-3);
+  color: var(--text-3);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.nav a .ico {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text-4);
+  line-height: 1.5;
+}
+
+/* ─── Header ─────────────────────────────────────────────── */
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2rem;
+}
+
+.hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.hero-title {
+  font-size: 1.9rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-0);
+  line-height: 1.15;
+  background: linear-gradient(135deg, var(--text-0) 0%, var(--text-2) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-sub {
+  font-size: 0.88rem;
+  color: var(--text-3);
+  margin-top: 0.4rem;
+  font-family: var(--font-mono);
+}
+
+.hero-sub strong { color: var(--text-1); font-weight: 600; }
+
+.hero-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.95rem;
+  border-radius: 9px;
+  border: 1px solid var(--border-hi);
+  background: var(--surface);
+  color: var(--text-1);
+  font-size: 0.83rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.btn:hover {
+  background: var(--surface-hi);
+  border-color: var(--accent);
+  color: var(--text-0);
+  transform: translateY(-1px);
+}
+
+.btn .ico { width: 14px; height: 14px; }
+
+/* ─── KPI Grid (Bento) ───────────────────────────────────── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+.kpi {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.35rem 1.4rem;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s ease;
+}
+
+.kpi:hover {
+  border-color: var(--border-hi);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.kpi::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, var(--accent-glow), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.kpi:hover::after { opacity: 1; }
+
+.kpi-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-3);
+  margin-bottom: 0.55rem;
+}
+
+.kpi-value {
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-0);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-value small {
+  font-size: 0.95rem;
+  color: var(--text-3);
+  font-weight: 600;
+  letter-spacing: 0;
+  margin-left: 0.15rem;
+}
+
+.kpi-sub {
+  font-size: 0.75rem;
+  color: var(--text-3);
+  margin-top: 0.45rem;
+}
+
+/* Risk score KPI — featured */
+.kpi.risk {
+  background: linear-gradient(135deg,
+    rgba(34, 211, 238, 0.08) 0%,
+    rgba(139, 92, 246, 0.06) 100%),
+    var(--surface);
+  border-color: rgba(34, 211, 238, 0.2);
+}
+
+.risk-content {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.risk-ring {
+  flex-shrink: 0;
+  position: relative;
+  width: 78px;
+  height: 78px;
+}
+
+.risk-ring svg {
+  transform: rotate(-90deg);
+}
+
+.risk-ring .track { stroke: var(--bg-3); }
+.risk-ring .bar {
+  stroke: url(#riskGradient);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.risk-ring .center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--text-0);
+  letter-spacing: -0.02em;
+}
+
+/* ─── Severity distribution ──────────────────────────────── */
+.sev-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.sev-bar-row {
+  display: grid;
+  grid-template-columns: 68px 1fr 32px;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.78rem;
+}
+
+.sev-bar-row .lbl {
+  color: var(--text-3);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+}
+
+.sev-bar-row .bar {
+  height: 6px;
+  background: var(--bg-3);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sev-bar-row .fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sev-bar-row .n {
+  text-align: right;
+  color: var(--text-2);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Section ────────────────────────────────────────────── */
+.section {
+  margin-bottom: 3rem;
+  scroll-margin-top: 1.5rem;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.section-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-0);
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.section-title .ico {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+}
+
+.section-badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Filters & Search ───────────────────────────────────── */
+.toolbar {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.filters {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chip:hover { border-color: var(--border-hi); color: var(--text-0); }
+
+.chip.active {
+  background: var(--accent);
+  color: var(--bg-0);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.chip .n {
+  font-size: 0.68rem;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.crit.active { background: var(--crit); border-color: var(--crit); box-shadow: 0 0 0 3px var(--crit-bg); color: #fff; }
+.chip.high.active { background: var(--high); border-color: var(--high); box-shadow: 0 0 0 3px var(--high-bg); }
+.chip.med.active  { background: var(--med);  border-color: var(--med);  box-shadow: 0 0 0 3px var(--med-bg); color: var(--bg-0); }
+.chip.low.active  { background: var(--low);  border-color: var(--low);  box-shadow: 0 0 0 3px var(--low-bg); color: var(--bg-0); }
+.chip.info.active { background: var(--info); border-color: var(--info); box-shadow: 0 0 0 3px var(--info-bg); color: var(--bg-0); }
+
+.search {
+  flex: 1;
+  min-width: 200px;
+  position: relative;
+}
+
+.search input {
+  width: 100%;
+  padding: 0.55rem 0.9rem 0.55rem 2.3rem;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-0);
+  font-size: 0.85rem;
+  font-family: inherit;
+  transition: all 0.15s;
+  outline: none;
+}
+
+.search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.search input::placeholder { color: var(--text-4); }
+
+.search svg {
+  position: absolute;
+  left: 0.8rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  color: var(--text-4);
+  pointer-events: none;
+}
+
+/* ─── Vulnerability cards ────────────────────────────────── */
+.vuln {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius);
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s ease;
+}
+
+.vuln:hover { border-color: var(--border-hi); }
+
+.vuln.critical { border-left-color: var(--crit); }
+.vuln.high     { border-left-color: var(--high); }
+.vuln.medium   { border-left-color: var(--med); }
+.vuln.low      { border-left-color: var(--low); }
+.vuln.info     { border-left-color: var(--info); }
+
+.vuln.open { box-shadow: var(--shadow-md); }
+
+.vuln-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.05rem 1.25rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.vuln-head:hover { background: rgba(255, 255, 255, 0.02); }
+
+.vuln-main { flex: 1; min-width: 0; }
+
+.vuln-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.vuln-title {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text-0);
+  letter-spacing: -0.01em;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.badge.critical { background: var(--crit-bg); color: var(--crit); border: 1px solid rgba(244, 63, 94, 0.3); }
+.badge.high     { background: var(--high-bg); color: var(--high); border: 1px solid rgba(251, 146, 60, 0.3); }
+.badge.medium   { background: var(--med-bg);  color: var(--med);  border: 1px solid rgba(250, 204, 21, 0.3); }
+.badge.low      { background: var(--low-bg);  color: var(--low);  border: 1px solid rgba(96, 165, 250, 0.3); }
+.badge.info     { background: var(--info-bg); color: var(--info); border: 1px solid rgba(148, 163, 184, 0.3); }
+
+.cvss-pill {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 5px;
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.vuln-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  font-size: 0.75rem;
+  color: var(--text-3);
+  flex-wrap: wrap;
+}
+
+.vuln-meta code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-2);
+  background: var(--bg-2);
+  padding: 0.08rem 0.35rem;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.vuln-chev {
+  width: 20px;
+  height: 20px;
+  color: var(--text-4);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.vuln.open .vuln-chev { transform: rotate(180deg); color: var(--accent); }
+
+.vuln-body {
+  display: none;
+  padding: 0 1.25rem 1.25rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0;
+  padding-top: 1.25rem;
+}
+
+.vuln.open .vuln-body { display: block; animation: fadeIn 0.25s ease; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.vuln-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.block {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 1rem;
+  overflow: hidden;
+}
+
+.block-title {
+  font-size: 0.67rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-3);
+  margin-bottom: 0.55rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.block-title .ico { width: 12px; height: 12px; }
+
+.block pre {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.block p {
+  font-size: 0.83rem;
+  color: var(--text-1);
+  line-height: 1.6;
+}
+
+/* PoC block */
+.poc {
+  position: relative;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.05), rgba(139, 92, 246, 0.04)), var(--bg-0);
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 2.6rem 0.85rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-0);
+  overflow-x: auto;
+  white-space: pre;
+  margin-top: 0.5rem;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+}
+
+.copy-btn:hover { background: var(--bg-3); color: var(--accent); border-color: var(--accent); }
+.copy-btn.copied { color: var(--ok); border-color: var(--ok); }
+
+.copy-btn svg { width: 14px; height: 14px; }
+
+/* Refs */
+.refs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+}
+
+.ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 0.72rem;
+  text-decoration: none;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+
+.ref:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ─── Data tables ────────────────────────────────────────── */
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+thead th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  background: var(--bg-1);
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--border);
+}
+
+tbody td {
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-1);
+}
+
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 0.12s; }
+tbody tr:hover { background: rgba(34, 211, 238, 0.03); }
+
+td.mono { font-family: var(--font-mono); font-size: 0.78rem; }
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 700;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-pill.ok { color: var(--ok); }
+.status-pill.warn { color: var(--med); }
+.status-pill.err { color: var(--crit); }
+.status-pill.dim { color: var(--text-4); }
+
+/* ─── Tech chips ─────────────────────────────────────────── */
+.tech-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tech {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  font-size: 0.82rem;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.15s;
+}
+
+.tech:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.tech::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+/* ─── Empty state ────────────────────────────────────────── */
+.empty {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-3);
+  background: var(--surface);
+  border: 1px dashed var(--border-hi);
+  border-radius: var(--radius);
+}
+
+.empty-ico { font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.6; }
+
+/* ─── Footer ─────────────────────────────────────────────── */
+.footer {
+  margin-top: 4rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: var(--text-4);
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+.footer strong { color: var(--text-2); }
+
+/* ─── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-1); }
+::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 5px; border: 2px solid var(--bg-1); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-4); }
+
+/* ─── Responsive ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  .nav { flex-direction: row; flex-wrap: wrap; }
+  .nav a .count { display: none; }
+  .main { padding: 1.5rem 1.25rem 3rem; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .hero-title { font-size: 1.4rem; }
+}
+
+@media (max-width: 520px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── Print ──────────────────────────────────────────────── */
+@media print {
+  body { background: #fff; color: #000; }
+  body::before { display: none; }
+  .sidebar, .hero-actions, .toolbar, .copy-btn { display: none !important; }
+  .app { grid-template-columns: 1fr; }
+  .vuln { break-inside: avoid; border: 1px solid #ccc; }
+  .vuln-body { display: block !important; }
+  .vuln-chev { display: none; }
+}
+</style>
+{% endraw %}
 </head>
 <body>
 
-  <h1>🐛 BugScanner — Security Report</h1>
-  <div class="meta">
-    <span>🎯 <strong>Target:</strong> {{ result.target }}</span>
-    <span>🕐 <strong>Started:</strong> {{ result.started_at | format_dt }}</span>
-    <span>🏁 <strong>Finished:</strong> {{ result.finished_at | format_dt }}</span>
-  </div>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="riskGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+</svg>
 
-  <div class="summary">
-    <div class="stat">
-      <div class="num">{{ result.vulnerabilities | length }}</div>
-      <div class="lbl">Total Vulns</div>
+<div class="app">
+
+  <!-- ══════════════ SIDEBAR ══════════════ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">🐛</div>
+      <span>BugScanner</span>
+      <span class="brand-ver">v2.0</span>
     </div>
-    <div class="stat">
-      <div class="num" style="color:#f85149;">
-        {{ result.vulnerabilities | selectattr('severity.name','equalto','HIGH') | list | length }}
+
+    <div>
+      <div class="nav-label">Report</div>
+      <nav class="nav">
+        <a href="#summary" class="active">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+          Summary
+        </a>
+        <a href="#vulnerabilities">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          Vulnerabilities
+          <span class="count">{{ result.vulnerabilities | length }}</span>
+        </a>
+        <a href="#technologies">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          Technologies
+          <span class="count">{{ result.technologies | length }}</span>
+        </a>
+        <a href="#subdomains">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          Subdomains
+          <span class="count">{{ result.subdomains | length }}</span>
+        </a>
+        <a href="#ports">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+          Open Ports
+          <span class="count">{{ result.open_ports | length }}</span>
+        </a>
+        <a href="#endpoints">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Endpoints
+          <span class="count">{{ result.endpoints | length }}</span>
+        </a>
+      </nav>
+    </div>
+
+    <div class="sidebar-footer">
+      <div style="color: var(--text-3); font-weight: 700; margin-bottom: 0.3rem;">Generated</div>
+      <div>{{ result.end_time | format_dt }}</div>
+      <div style="margin-top: 0.75rem; color: var(--text-4); font-size: 0.68rem; line-height: 1.5;">
+        ⚠️ Authorized use only.<br>
+        For defensive security assessments.
       </div>
-      <div class="lbl">HIGH</div>
     </div>
-    <div class="stat">
-      <div class="num" style="color:#e3b341;">
-        {{ result.vulnerabilities | selectattr('severity.name','equalto','MEDIUM') | list | length }}
+  </aside>
+
+  <!-- ══════════════ MAIN ══════════════ -->
+  <main class="main">
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-top">
+        <div>
+          <h1 class="hero-title">Security Assessment Report</h1>
+          <div class="hero-sub">
+            <strong>Target:</strong> {{ result.target }}<br>
+            <strong>Scan window:</strong>
+            {{ result.start_time | format_dt }}
+            {% if result.end_time %} → {{ result.end_time | format_dt }}{% endif %}
+          </div>
+        </div>
+        <div class="hero-actions">
+          <button class="btn" onclick="toggleTheme()">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            Theme
+          </button>
+          <button class="btn" onclick="window.print()">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Print
+          </button>
+          <button class="btn" onclick="downloadJSON()">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            JSON
+          </button>
+        </div>
       </div>
-      <div class="lbl">MEDIUM</div>
-    </div>
-    <div class="stat">
-      <div class="num" style="color:#3fb950;">
-        {{ result.vulnerabilities | selectattr('severity.name','equalto','LOW') | list | length }}
+    </section>
+
+    <!-- KPI / Summary -->
+    <section id="summary" class="section">
+      <div class="kpi-grid">
+        <div class="kpi risk">
+          <div class="kpi-label">Risk Score</div>
+          <div class="risk-content">
+            <div class="risk-ring">
+              <svg width="78" height="78">
+                <circle class="track" cx="39" cy="39" r="32" fill="none" stroke-width="7"/>
+                <circle class="bar" cx="39" cy="39" r="32" fill="none" stroke-width="7"
+                        stroke-dasharray="201"
+                        stroke-dashoffset="{{ 201 - (result.risk_score * 20.1) }}"/>
+              </svg>
+              <div class="center">{{ result.risk_score }}</div>
+            </div>
+            <div style="min-width: 0;">
+              <div style="font-size: 1.1rem; font-weight: 800; color: var(--text-0);">/10</div>
+              <div class="kpi-sub">Weighted by severity</div>
+              {% if result.false_positives_filtered %}
+              <div class="kpi-sub" style="margin-top: 0.3rem;">
+                <span style="color: var(--ok);">✓</span>
+                {{ result.false_positives_filtered }} FP filtered
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-label">Vulnerabilities</div>
+          <div class="kpi-value">{{ result.vulnerabilities | length }}</div>
+          <div class="sev-bars">
+            {% set total = result.vulnerabilities | length if result.vulnerabilities | length > 0 else 1 %}
+            {% set by_sev = result.vuln_count_by_severity %}
+            {% for sev, color in [('critical', 'var(--crit)'), ('high', 'var(--high)'), ('medium', 'var(--med)'), ('low', 'var(--low)'), ('info', 'var(--info)')] %}
+            <div class="sev-bar-row">
+              <span class="lbl">{{ sev }}</span>
+              <div class="bar"><div class="fill" style="width: {{ (by_sev[sev] / total * 100) | round(1) }}%; background: {{ color }};"></div></div>
+              <span class="n">{{ by_sev[sev] }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-label">Recon Surface</div>
+          <div class="kpi-value">{{ result.subdomains | length }}<small>subdomains</small></div>
+          <div class="kpi-value" style="font-size: 1.4rem; margin-top: 0.5rem;">
+            {{ result.open_ports | length }}<small>ports</small>
+            &nbsp;·&nbsp;
+            {{ result.endpoints | length }}<small>endpoints</small>
+          </div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-label">Scan Duration</div>
+          <div class="kpi-value" style="font-size: 1.5rem;">
+            {% if result.end_time %}
+              {% set dur = (result.end_time - result.start_time).total_seconds() %}
+              {{ (dur // 60) | int }}<small>m</small> {{ (dur % 60) | int }}<small>s</small>
+            {% else %}
+              —
+            {% endif %}
+          </div>
+          <div class="kpi-sub">{{ result.technologies | length }} technologies identified</div>
+        </div>
       </div>
-      <div class="lbl">LOW</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ "%.2f" | format(result.risk_score) }}/10</div>
-      <div class="lbl">Risk Score</div>
-    </div>
-  </div>
+    </section>
 
-  <hr>
+    <!-- ══════════════ VULNERABILITIES ══════════════ -->
+    <section id="vulnerabilities" class="section">
+      <div class="section-head">
+        <h2 class="section-title">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          Vulnerabilities
+        </h2>
+        <span class="section-badge">{{ result.vulnerabilities | length }} total</span>
+      </div>
 
-  {% if result.vulnerabilities %}
-    {% for v in result.vulnerabilities %}
-    <div class="vuln {{ v.severity.name }}">
-      <h3>
-        <span class="badge {{ v.severity.name }}">{{ v.severity.name }}</span>
-        {{ v.title }}
-        <small style="color:#8b949e; font-weight:normal;">— CVSS {{ v.cvss_score }}</small>
-      </h3>
-      <div class="url">🔗 {{ v.url }}</div>
-      {% if v.parameter %}
-      <div class="url">📌 Parameter: <code>{{ v.parameter }}</code> | Method: {{ v.method }}</div>
-      {% endif %}
-      <div class="desc">{{ v.description | safe_text }}</div>
-      {% if v.evidence %}
-      <details>
-        <summary>🔍 Evidence</summary>
-        <pre>{{ v.evidence | safe_code }}</pre>
-      </details>
-      {% endif %}
-      {% if v.exploitation %}
-      <details>
-        <summary>💥 PoC / Exploitation</summary>
-        <pre>{{ v.exploitation | safe_code }}</pre>
-      </details>
-      {% endif %}
-      {% if v.curl_poc %}
-      <details>
-        <summary>🖥 cURL PoC</summary>
-        <pre>{{ v.curl_poc | safe_code }}</pre>
-      </details>
-      {% endif %}
-      {% if v.remediation %}
-      <details>
-        <summary>🛠 Remediation</summary>
-        <pre>{{ v.remediation | safe_code }}</pre>
-      </details>
-      {% endif %}
-      {% if v.references %}
-      <details>
-        <summary>📚 References</summary>
-        <pre>{% for ref in v.references %}{{ ref }}
-{% endfor %}</pre>
-      </details>
-      {% endif %}
-    </div>
-    {% endfor %}
-  {% else %}
-    <p class="no-vulns">✅ Heç bir vulnerability tapılmadı.</p>
-  {% endif %}
+      {% if result.vulnerabilities %}
+      <div class="toolbar">
+        <div class="filters">
+          <button class="chip active" data-filter="all">All <span class="n">{{ result.vulnerabilities | length }}</span></button>
+          {% set by_sev = result.vuln_count_by_severity %}
+          {% if by_sev.critical %}<button class="chip crit" data-filter="critical">Critical <span class="n">{{ by_sev.critical }}</span></button>{% endif %}
+          {% if by_sev.high %}<button class="chip high" data-filter="high">High <span class="n">{{ by_sev.high }}</span></button>{% endif %}
+          {% if by_sev.medium %}<button class="chip med" data-filter="medium">Medium <span class="n">{{ by_sev.medium }}</span></button>{% endif %}
+          {% if by_sev.low %}<button class="chip low" data-filter="low">Low <span class="n">{{ by_sev.low }}</span></button>{% endif %}
+          {% if by_sev.info %}<button class="chip info" data-filter="info">Info <span class="n">{{ by_sev.info }}</span></button>{% endif %}
+        </div>
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="vulnSearch" placeholder="Search title, URL, type, CWE…">
+        </div>
+      </div>
 
+      <div id="vulnList">
+      {% for v in result.vulnerabilities %}
+        <div class="vuln {{ v.severity.value }}" data-sev="{{ v.severity.value }}">
+          <div class="vuln-head" onclick="toggleVuln(this)">
+            <div class="vuln-main">
+              <div class="vuln-title-row">
+                <span class="badge {{ v.severity.value }}">{{ v.severity.emoji }} {{ v.severity.value }}</span>
+                <span class="vuln-title">{{ v.title }}</span>
+                <span class="cvss-pill">CVSS {{ v.cvss_score }}</span>
+              </div>
+              <div class="vuln-meta">
+                <span>{{ v.vuln_type }}</span>
+                {% if v.method %}<span>· {{ v.method }}</span>{% endif %}
+                {% if v.cwe_id %}<span>· {{ v.cwe_id }}</span>{% endif %}
+                <code>{{ v.url }}</code>
+              </div>
+            </div>
+            <svg class="vuln-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+
+          <div class="vuln-body">
+            <div class="vuln-grid">
+              <div class="block">
+                <div class="block-title">📋 Description</div>
+                <p>{{ v.description }}</p>
+              </div>
+              <div class="block">
+                <div class="block-title">🔍 Evidence</div>
+                <pre>{{ v.evidence }}</pre>
+              </div>
+              <div class="block">
+                <div class="block-title">💥 Exploitation</div>
+                <pre>{{ v.exploitation }}</pre>
+              </div>
+              <div class="block">
+                <div class="block-title">🛡️ Remediation</div>
+                <pre>{{ v.remediation }}</pre>
+              </div>
+            </div>
+
+            {% if v.payload_used or v.parameter %}
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; font-size: 0.78rem; color: var(--text-3);">
+              {% if v.parameter %}<span><strong>Parameter:</strong> <code style="color: var(--accent);">{{ v.parameter }}</code></span>{% endif %}
+              {% if v.payload_used %}<span><strong>Payload:</strong> <code>{{ v.payload_used[:80] }}</code></span>{% endif %}
+            </div>
+            {% endif %}
+
+            {% if v.curl_poc %}
+            <div class="block-title" style="margin-top: 0.75rem;">⚡ Proof of Concept</div>
+            <div class="poc" style="position: relative;">
+              {{ v.curl_poc }}
+              <button class="copy-btn" onclick="copyText(this, {{ v.curl_poc | tojson }})" title="Copy">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            {% endif %}
+
+            {% if v.references %}
+            <div class="refs">
+              {% for ref in v.references %}
+              <a class="ref" href="{{ ref }}" target="_blank" rel="noopener">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14 21 3"/></svg>
+                Reference
+              </a>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+
+      <div id="noVulnMatch" class="empty" style="display: none;">
+        <div class="empty-ico">🔍</div>
+        <div>No vulnerabilities match your filter.</div>
+      </div>
+
+      {% else %}
+      <div class="empty">
+        <div class="empty-ico">✅</div>
+        <div>No vulnerabilities detected. The target appears well-configured.</div>
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- ══════════════ TECHNOLOGIES ══════════════ -->
+    {% if result.technologies %}
+    <section id="technologies" class="section">
+      <div class="section-head">
+        <h2 class="section-title">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          Detected Technologies
+        </h2>
+        <span class="section-badge">{{ result.technologies | length }}</span>
+      </div>
+      <div class="tech-grid">
+        {% for t in result.technologies %}
+        <span class="tech">{{ t }}</span>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- ══════════════ SUBDOMAINS ══════════════ -->
+    {% if result.subdomains %}
+    <section id="subdomains" class="section">
+      <div class="section-head">
+        <h2 class="section-title">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          Subdomains
+        </h2>
+        <span class="section-badge">{{ result.subdomains | length }}</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Subdomain</th><th>IP</th><th>HTTP</th><th>Technologies</th></tr>
+          </thead>
+          <tbody>
+            {% for s in result.subdomains %}
+            <tr>
+              <td class="mono" style="color: var(--accent);">{{ s.subdomain }}</td>
+              <td class="mono" style="color: var(--text-3);">{{ s.ip or '—' }}</td>
+              <td>
+                {% if s.status and s.status < 400 %}
+                  <span class="status-pill ok">{{ s.status }}</span>
+                {% elif s.status and s.status < 500 %}
+                  <span class="status-pill warn">{{ s.status }}</span>
+                {% elif s.status %}
+                  <span class="status-pill err">{{ s.status }}</span>
+                {% else %}
+                  <span class="status-pill dim">no HTTP</span>
+                {% endif %}
+              </td>
+              <td style="color: var(--text-3); font-size: 0.78rem;">{{ s.technologies | join(', ') if s.technologies else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- ══════════════ OPEN PORTS ══════════════ -->
+    {% if result.open_ports %}
+    <section id="ports" class="section">
+      <div class="section-head">
+        <h2 class="section-title">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+          Open Ports
+        </h2>
+        <span class="section-badge">{{ result.open_ports | length }}</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Port</th><th>Protocol</th><th>Service</th><th>Version / Banner</th></tr>
+          </thead>
+          <tbody>
+            {% for p in result.open_ports %}
+            <tr>
+              <td class="mono" style="color: var(--accent); font-weight: 700;">{{ p.port }}</td>
+              <td style="color: var(--text-3);">{{ p.protocol }}</td>
+              <td style="color: var(--med); font-weight: 600;">{{ p.service }}</td>
+              <td class="mono" style="color: var(--text-3); font-size: 0.75rem;">{{ (p.version or '—')[:80] }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- ══════════════ ENDPOINTS ══════════════ -->
+    {% if result.endpoints %}
+    <section id="endpoints" class="section">
+      <div class="section-head">
+        <h2 class="section-title">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Discovered Endpoints
+        </h2>
+        <span class="section-badge">{{ result.endpoints | length }}</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width: 40px;">#</th><th>URL</th></tr></thead>
+          <tbody>
+            {% for ep in result.endpoints %}
+            <tr>
+              <td style="color: var(--text-4); font-variant-numeric: tabular-nums;">{{ loop.index }}</td>
+              <td class="mono" style="color: var(--text-1); word-break: break-all;">{{ ep }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- ══════════════ FOOTER ══════════════ -->
+    <footer class="footer">
+      <div>Generated by <strong>🐛 BugScanner v2.0</strong> · Bug Bounty Automation Framework</div>
+      <div style="margin-top: 0.4rem;">
+        Report ID: <span style="font-family: var(--font-mono);">{{ result.target | replace('https://', '') | replace('http://', '') | replace('/', '_') }}</span>
+        · {{ result.end_time | format_dt }}
+      </div>
+      <div style="margin-top: 1rem; color: var(--text-4); font-size: 0.7rem;">
+        ⚠️ This report contains sensitive security information. Handle responsibly.
+        Findings are provided for defensive purposes and authorized testing only.
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<!-- Embedded JSON for download -->
+<script id="reportData" type="application/json">{{ result.to_dict() | tojson }}</script>
+
+{% raw %}
+<script>
+// ─── Theme toggle ─────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  try { localStorage.setItem('bs-theme', next); } catch(e) {}
+}
+(function initTheme() {
+  try {
+    const saved = localStorage.getItem('bs-theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+  } catch(e) {}
+})();
+
+// ─── Vuln expand/collapse ─────────────────────────────────
+function toggleVuln(head) {
+  const card = head.closest('.vuln');
+  card.classList.toggle('open');
+}
+
+// ─── Copy to clipboard ────────────────────────────────────
+function copyText(btn, text) {
+  const done = () => {
+    btn.classList.add('copied');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    }, 1500);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+function fallbackCopy(text, cb) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); cb(); } catch(e) {}
+  document.body.removeChild(ta);
+}
+
+// ─── Filters ──────────────────────────────────────────────
+document.querySelectorAll('.chip[data-filter]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.chip[data-filter]').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    applyFilters();
+  });
+});
+
+// ─── Search ───────────────────────────────────────────────
+const searchInput = document.getElementById('vulnSearch');
+if (searchInput) {
+  searchInput.addEventListener('input', applyFilters);
+}
+
+function applyFilters() {
+  const activeChip = document.querySelector('.chip[data-filter].active');
+  const filter = activeChip ? activeChip.dataset.filter : 'all';
+  const query = (searchInput?.value || '').trim().toLowerCase();
+  const cards = document.querySelectorAll('#vulnList .vuln');
+  let visible = 0;
+
+  cards.forEach(card => {
+    const sev = card.dataset.sev;
+    const text = card.textContent.toLowerCase();
+    const sevMatch = filter === 'all' || sev === filter;
+    const queryMatch = !query || text.includes(query);
+    const show = sevMatch && queryMatch;
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+
+  const empty = document.getElementById('noVulnMatch');
+  if (empty) empty.style.display = visible === 0 ? 'block' : 'none';
+}
+
+// ─── Sidebar active state on scroll ───────────────────────
+const navLinks = document.querySelectorAll('.nav a[href^="#"]');
+const sections = [...navLinks].map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+
+if ('IntersectionObserver' in window) {
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = '#' + entry.target.id;
+        navLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === id));
+      }
+    });
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  sections.forEach(s => observer.observe(s));
+}
+
+// ─── Animate bars/rings on load ───────────────────────────
+window.addEventListener('load', () => {
+  document.querySelectorAll('.sev-bar-row .fill').forEach(el => {
+    const w = el.style.width;
+    el.style.width = '0';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { el.style.width = w; });
+    });
+  });
+});
+
+// ─── JSON download ────────────────────────────────────────
+function downloadJSON() {
+  const el = document.getElementById('reportData');
+  if (!el) return;
+  const data = JSON.parse(el.textContent);
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safe = (data.target || 'report').replace(/[^a-z0-9]+/gi, '_');
+  a.href = url;
+  a.download = `bugscanner_${safe}_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+{% endraw %}
 </body>
 </html>
