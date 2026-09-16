@@ -1,5 +1,6 @@
 """
 Data models — Vulnerability, ScanResult, Severity
+v2.1: Added fp_stats field to ScanResult for false-positive breakdown.
 """
 
 from dataclasses import dataclass, field
@@ -50,6 +51,7 @@ class Severity(Enum):
 
 
 def calculate_severity(cvss_score: float) -> Severity:
+    """Calculate severity from CVSS score (CVSS v3.1)."""
     if cvss_score >= 9.0:
         return Severity.CRITICAL
     elif cvss_score >= 7.0:
@@ -63,6 +65,8 @@ def calculate_severity(cvss_score: float) -> Severity:
 
 @dataclass
 class Vulnerability:
+    """A single vulnerability finding."""
+
     vuln_type: str                          # "XSS", "SQLi", "CORS", etc.
     url: str                                # Affected URL
     severity: Severity
@@ -103,6 +107,8 @@ class Vulnerability:
 
 @dataclass
 class PortInfo:
+    """An open TCP/UDP port."""
+
     port: int
     protocol: str           # tcp/udp
     state: str              # open/closed/filtered
@@ -114,6 +120,8 @@ class PortInfo:
 
 @dataclass
 class SubdomainInfo:
+    """A discovered subdomain."""
+
     subdomain: str
     ip: Optional[str] = None
     status: Optional[int] = None        # HTTP status
@@ -124,6 +132,8 @@ class SubdomainInfo:
 
 @dataclass
 class ScanResult:
+    """Complete result of a scan."""
+
     target: str
     start_time: datetime = field(default_factory=datetime.now)
     end_time: Optional[datetime] = None
@@ -138,10 +148,16 @@ class ScanResult:
     vulnerabilities: list[Vulnerability] = field(default_factory=list)
 
     # Statistics
-    false_positives_filtered: int = 0    # ← NEW: was missing before
+    false_positives_filtered: int = 0
+    fp_stats: dict = field(default_factory=dict)   # ← v2.1: FP breakdown
+
+    # ══════════════════════════════════════════════════════════
+    #  Computed properties
+    # ══════════════════════════════════════════════════════════
 
     @property
     def vuln_count_by_severity(self) -> dict:
+        """Count vulnerabilities grouped by severity level."""
         counts = {s.value: 0 for s in Severity}
         for v in self.vulnerabilities:
             counts[v.severity.value] += 1
@@ -149,27 +165,54 @@ class ScanResult:
 
     @property
     def risk_score(self) -> float:
-        """Overall risk score — weighted average."""
+        """
+        Overall risk score — weighted average across all findings.
+        Range: 0.0 – 10.0
+        """
         if not self.vulnerabilities:
             return 0.0
-        weights = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
-        total = sum(v.cvss_score * weights[v.severity.value] for v in self.vulnerabilities)
+        weights = {
+            "critical": 4,
+            "high":     3,
+            "medium":   2,
+            "low":      1,
+            "info":     0,
+        }
+        total = sum(
+            v.cvss_score * weights[v.severity.value]
+            for v in self.vulnerabilities
+        )
         max_possible = len(self.vulnerabilities) * 10 * 4
         return round((total / max_possible) * 10, 2) if max_possible > 0 else 0.0
+
+    @property
+    def duration_seconds(self) -> float:
+        """Total scan duration in seconds."""
+        if not self.end_time:
+            return 0.0
+        return (self.end_time - self.start_time).total_seconds()
+
+    # ══════════════════════════════════════════════════════════
+    #  Serialization
+    # ══════════════════════════════════════════════════════════
 
     def to_dict(self) -> dict:
         return {
             "target": self.target,
             "start_time": self.start_time.isoformat(),
-            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "end_time": (
+                self.end_time.isoformat() if self.end_time else None
+            ),
             "summary": {
                 "subdomains_found": len(self.subdomains),
                 "open_ports": len(self.open_ports),
                 "endpoints_found": len(self.endpoints),
                 "total_vulnerabilities": len(self.vulnerabilities),
                 "false_positives_filtered": self.false_positives_filtered,
+                "fp_stats": self.fp_stats,
                 "by_severity": self.vuln_count_by_severity,
                 "risk_score": self.risk_score,
+                "duration_seconds": round(self.duration_seconds, 2),
             },
             "technologies": self.technologies,
             "subdomains": [
@@ -191,5 +234,8 @@ class ScanResult:
                 }
                 for p in self.open_ports
             ],
-            "vulnerabilities": [v.to_dict() for v in self.vulnerabilities],
+            "endpoints": self.endpoints,
+            "vulnerabilities": [
+                v.to_dict() for v in self.vulnerabilities
+            ],
         }

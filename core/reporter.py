@@ -1,5 +1,6 @@
 """
-Reporter — JSON və HTML report generasiyası
+Reporter — JSON, HTML, and SARIF report generation.
+v2.1: Added SARIF export for GitHub Security integration.
 """
 
 import json
@@ -11,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 from markupsafe import Markup, escape
 from rich.console import Console
 from core.models import ScanResult
+from core.sarif_reporter import save_sarif
 
 console = Console()
 
@@ -27,14 +29,12 @@ def format_dt(dt) -> str:
 
 
 def safe_text(value) -> Markup:
-    """HTML escape et amma newline-ları <br>-ə çevir"""
     if value is None:
         return Markup("")
     return Markup(str(escape(str(value))).replace('\n', '<br>'))
 
 
 def safe_code(value) -> Markup:
-    """Kod blokları üçün — escape et, newline saxla"""
     if value is None:
         return Markup("")
     return Markup(str(escape(str(value))))
@@ -73,17 +73,15 @@ class Reporter:
         return path
 
     async def save_html(self, result: ScanResult) -> Path | None:
-        # BUG FIX 2: template tapılmasa proqram çökmür,
-        # xəbərdarlıq verib None qaytarır.
         base = self._filename_base(result.target)
         path = self.output_dir / f"{base}.html"
         try:
             template = self.jinja.get_template("template.html")
         except TemplateNotFound:
             console.print(
-                "[yellow]⚠ HTML template tapılmadı "
+                "[yellow]⚠ HTML template not found "
                 f"({TEMPLATE_DIR / 'template.html'}). "
-                "HTML report atlanır.[/yellow]"
+                "Skipping HTML report.[/yellow]"
             )
             return None
         html = template.render(result=result, format_dt=format_dt)
@@ -92,9 +90,15 @@ class Reporter:
         console.print(f"[green]🌐 HTML report:[/green] {path}")
         return path
 
-    async def save_all(self, result: ScanResult) -> dict[str, Path | None]:
-        json_path, html_path = await asyncio.gather(
+    async def save_sarif(self, result: ScanResult) -> Path:
+        path = await save_sarif(result, str(self.output_dir))
+        console.print(f"[green]🔒 SARIF report:[/green] {path}")
+        return path
+
+    async def save_all(self, result: ScanResult) -> dict:
+        json_path, html_path, sarif_path = await asyncio.gather(
             self.save_json(result),
             self.save_html(result),
+            self.save_sarif(result),
         )
-        return {"json": json_path, "html": html_path}
+        return {"json": json_path, "html": html_path, "sarif": sarif_path}

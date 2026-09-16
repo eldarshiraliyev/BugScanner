@@ -1,11 +1,12 @@
 """
-Nuclei Wrapper — Nuclei scan-ı run et və nəticələri parse et
+Nuclei Wrapper — run Nuclei scan and parse results.
+v2.1: Uses configured template path, adds rate limiting, respects config.
 """
 
 import asyncio
 import json
+import os
 import shutil
-from pathlib import Path
 from rich.console import Console
 from core.models import Vulnerability, Severity
 
@@ -21,9 +22,18 @@ SEVERITY_MAP = {
 
 
 class NucleiWrapper:
-    def __init__(self):
+    def __init__(self, config: dict = None):
         self.nuclei_path = shutil.which("nuclei")
         self.available = self.nuclei_path is not None
+
+        cfg = (config or {}).get("nuclei", {})
+        self.templates_path = os.path.expanduser(
+            cfg.get("templates_path", "~/.local/nuclei-templates")
+        )
+        self.severity_filter = cfg.get(
+            "severity", ["critical", "high", "medium", "low"]
+        )
+        self.rate_limit = cfg.get("rate_limit", 150)
 
     async def _run(self, cmd: list[str]) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(
@@ -37,7 +47,7 @@ class NucleiWrapper:
     async def update_templates(self):
         if not self.available:
             return
-        console.print("[dim]Nuclei templates yenilənir...[/dim]")
+        console.print("[dim]Updating Nuclei templates...[/dim]")
         await self._run([self.nuclei_path, "-update-templates", "-silent"])
 
     def _parse_jsonl(self, output: str) -> list[Vulnerability]:
@@ -57,19 +67,17 @@ class NucleiWrapper:
             matched_at = data.get("matched-at", data.get("host", ""))
             template_id = data.get("template-id", "unknown")
             name = info.get("name", template_id)
-            description = info.get("description", "Nuclei template tapıntısı")
-            remediation = info.get("remediation", "Nuclei template-ə bax")
+            description = info.get("description", "Nuclei template finding")
+            remediation = info.get("remediation", "See Nuclei template")
 
-            # References
             refs = info.get("reference", [])
             if isinstance(refs, str):
                 refs = [refs]
 
-            # Exploitation — tags-dən hint
             tags = info.get("tags", [])
             tags_str = ", ".join(tags) if isinstance(tags, list) else str(tags)
 
-            vuln = Vulnerability(
+            vulns.append(Vulnerability(
                 vuln_type=f"Nuclei: {template_id}",
                 url=matched_at,
                 severity=severity,
@@ -82,15 +90,14 @@ class NucleiWrapper:
                     f"Matched: {matched_at}"
                 ),
                 exploitation=(
-                    f"Nuclei template-i manual run et:\n"
+                    f"Run the Nuclei template manually:\n"
                     f"nuclei -u {matched_at} -t {template_id} -v"
                 ),
                 remediation=remediation,
                 references=refs[:5],
                 curl_poc=f"nuclei -u '{matched_at}' -t '{template_id}'",
                 cwe_id=None,
-            )
-            vulns.append(vuln)
+            ))
 
         return vulns
 
@@ -99,30 +106,36 @@ class NucleiWrapper:
         target: str,
         severity: list[str] = None,
         templates: list[str] = None,
-        rate_limit: int = 150,
+        rate_limit: int = None,
     ) -> list[Vulnerability]:
 
         if not self.available:
-            console.print("[yellow]⚠️  Nuclei tapılmadı — skip edilir[/yellow]")
+            console.print("[yellow]⚠  Nuclei not found — skipping[/yellow]")
             console.print("[dim]  Install: https://github.com/projectdiscovery/nuclei[/dim]")
             return []
 
         console.print(f"\n[bold cyan]☢️  Nuclei scan:[/bold cyan] {target}")
 
-        severity_filter = severity or ["critical", "high", "medium", "low"]
-
         cmd = [
             self.nuclei_path,
             "-u", target,
-            "-severity", ",".join(severity_filter),
-            "-rate-limit", str(rate_limit),
+            "-severity", ",".join(severity or self.severity_filter),
+            "-rate-limit", str(rate_limit or self.rate_limit),
             "-json",
             "-silent",
             "-no-interactsh",
         ]
 
+        # v2.1 — use configured template path if it exists
         if templates:
             cmd += ["-t", ",".join(templates)]
+        elif self.templates_path and os.path.isdir(self.templates_path):
+            cmd += ["-t", self.templates_path]
+        else:
+            console.print(
+                f"[yellow]  ⚠ Template path not found ({self.templates_path}), "
+                f"using default templates[/yellow]"
+            )
 
         returncode, stdout, stderr = await self._run(cmd)
 
@@ -131,7 +144,7 @@ class NucleiWrapper:
             return []
 
         vulns = self._parse_jsonl(stdout)
-        console.print(f"[bold green]  Nuclei: {len(vulns)} tapıntı[/bold green]")
+        console.print(f"[bold green]  Nuclei: {len(vulns)} findings[/bold green]")
 
         for v in vulns:
             console.print(

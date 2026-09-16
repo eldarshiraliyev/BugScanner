@@ -38,3 +38,35 @@ Thumbs.db
 # Node (frontend)
 frontend/node_modules/
 frontend/dist/
+
+# ── Test artifacts ──
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.log
+
+# ── PoC files (local only) ──
+clickjack_poc.html
+*.poc.html
+
+# ── Reports (auto-generated) ──
+reports/*.html
+reports/*.json
+reports/*.sarif
+!reports/template.html
+!reports/_styles.html
+!reports/_scripts.html
+
+# ── Environment ──
+.env
+.env.local
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+
+# ── OS ──
+.DS_Store
+Thumbs.db

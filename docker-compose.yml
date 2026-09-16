@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  bugscanner:
+    build: .
+    container_name: bugscanner
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./reports:/app/reports
+      - ./settings.yaml:/app/settings.yaml:ro
+    environment:
+      - BUGSCANNER_API_KEY=${BUGSCANNER_API_KEY:-}
+      - BUGSCANNER_LOG_LEVEL=${BUGSCANNER_LOG_LEVEL:-INFO}
+      - BUGSCANNER_CORS=${BUGSCANNER_CORS:-*}
+    restart: unless-stopped
+
+  # Optional: Nuclei sidecar for template scanning
+  # Usage: docker compose --profile nuclei up
+  nuclei:
+    image: projectdiscovery/nuclei:latest
+    container_name: bugscanner-nuclei
+    profiles: ["nuclei"]
+    volumes:
+      - ./nuclei-templates:/root/nuclei-templates
+    command: ["-version"]
+    restart: "no"

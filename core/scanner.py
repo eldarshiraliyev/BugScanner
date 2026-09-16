@@ -1,12 +1,13 @@
 """
-Main Scanner Orchestrator — v2.0
-WAF Detection + FP Validation + Business Logic + Auth
+Main Scanner Orchestrator — v2.1
+WAF Detection + FP Filter + Active Validation + Business Logic + Auth + Cache
 """
 
 import asyncio
 import yaml
 from datetime import datetime
 from pathlib import Path
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -17,6 +18,8 @@ from core.http_client import HttpClient
 from core.models import ScanResult, Severity
 from core.waf_detector import WAFDetector
 from core.validator import FalsePositiveValidator
+from core.fp_filter import FPFilter
+from core.logger import get_logger
 
 from modules.recon.subdomain import SubdomainScanner
 from modules.recon.portscan import PortScanner
@@ -34,8 +37,8 @@ from modules.vulns.nuclei_wrapper import NucleiWrapper
 from modules.vulns.business_logic import BusinessLogicScanner
 
 console = Console()
+log = get_logger("scanner")
 
-# settings.yaml sits at the project root; fall back to legacy config/ path
 CONFIG_PATH = Path(__file__).parent.parent / "settings.yaml"
 _LEGACY_CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
 
@@ -56,6 +59,7 @@ class BugScanner:
         validate_fp: bool = True,
         run_business_logic: bool = False,
         run_nuclei: bool = True,
+        enable_cache: bool = True,
     ):
         self.config = config or load_config()
         self.cookies = cookies or {}
@@ -63,8 +67,11 @@ class BugScanner:
         self.proxy = proxy
         self.validate_fp = validate_fp
         self.run_business_logic = run_business_logic
-        # Respect both the CLI flag and the global config toggle
-        self.run_nuclei = run_nuclei and self.config.get("nuclei", {}).get("enabled", True)
+        self.run_nuclei = (
+            run_nuclei
+            and self.config.get("nuclei", {}).get("enabled", True)
+        )
+        self.enable_cache = enable_cache
 
         rl = self.config["rate_limiting"]
         sc = self.config["scanning"]
@@ -85,35 +92,62 @@ class BugScanner:
             "cookies":       self.cookies,
             "headers":       self.headers,
             "proxy":         self.proxy,
+            "enable_cache":  self.enable_cache,
         }
+        self._http_client: HttpClient | None = None
 
+    # ══════════════════════════════════════════════════════════
+    #  Banner
+    # ══════════════════════════════════════════════════════════
     def _print_banner(self, target: str):
         auth_status = (
             "[green]Authenticated[/green]"
             if self.cookies or self.headers
             else "[dim]Unauthenticated[/dim]"
         )
-        bl_status = "[green]ON[/green]" if self.run_business_logic else "[dim]OFF[/dim]"
-        fp_status = "[green]ON[/green]" if self.validate_fp else "[dim]OFF[/dim]"
-        nuclei_status = "[green]ON[/green]" if self.run_nuclei else "[dim]OFF[/dim]"
+        bl_status = (
+            "[green]ON[/green]"
+            if self.run_business_logic
+            else "[dim]OFF[/dim]"
+        )
+        fp_status = (
+            "[green]ON[/green]" if self.validate_fp else "[dim]OFF[/dim]"
+        )
+        nuclei_status = (
+            "[green]ON[/green]" if self.run_nuclei else "[dim]OFF[/dim]"
+        )
+        cache_status = (
+            "[green]ON[/green]" if self.enable_cache else "[dim]OFF[/dim]"
+        )
 
         console.print(Panel.fit(
-            f"[bold cyan]BugScanner[/bold cyan] [dim]v2.0[/dim]\n"
+            f"[bold cyan]BugScanner[/bold cyan] [dim]v2.1[/dim]\n"
             f"[bold]Target:[/bold]         {target}\n"
             f"[bold]Auth:[/bold]           {auth_status}\n"
             f"[bold]Business Logic:[/bold] {bl_status}\n"
             f"[bold]FP Validation:[/bold]  {fp_status}\n"
             f"[bold]Nuclei:[/bold]         {nuclei_status}\n"
+            f"[bold]Cache:[/bold]          {cache_status}\n"
             f"[bold]Proxy:[/bold]          {self.proxy or 'none'}\n"
-            f"[bold]Time:[/bold]           {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            border_style="cyan"
+            f"[bold]Time:[/bold]           "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            border_style="cyan",
         ))
+        log.info(
+            "scan_started",
+            target=target,
+            proxy=self.proxy,
+            authenticated=bool(self.cookies or self.headers),
+        )
 
+    # ══════════════════════════════════════════════════════════
+    #  Summary table — includes FP stats
+    # ══════════════════════════════════════════════════════════
     def _print_summary(self, result: ScanResult):
         table = Table(
             title="📊 Scan Summary",
             box=box.ROUNDED,
-            border_style="cyan"
+            border_style="cyan",
         )
         table.add_column("Category", style="bold")
         table.add_column("Count", justify="right")
@@ -123,10 +157,45 @@ class BugScanner:
         table.add_row("Endpoints",      str(len(result.endpoints)))
         table.add_row("Vulnerabilities", str(len(result.vulnerabilities)))
 
+        # ── FP stats breakdown ──
         if result.false_positives_filtered:
             table.add_row(
                 "[dim]FP filtered[/dim]",
-                f"[dim]{result.false_positives_filtered}[/dim]"
+                f"[dim]{result.false_positives_filtered}[/dim]",
+            )
+            fp_stats = getattr(result, "fp_stats", {}) or {}
+            if fp_stats.get("filtered_spa"):
+                table.add_row(
+                    "[dim]  ↳ SPA-based[/dim]",
+                    f"[dim]{fp_stats['filtered_spa']}[/dim]",
+                )
+            if fp_stats.get("filtered_no_signature"):
+                table.add_row(
+                    "[dim]  ↳ No signature[/dim]",
+                    f"[dim]{fp_stats['filtered_no_signature']}[/dim]",
+                )
+            if fp_stats.get("filtered_no_admin_dom"):
+                table.add_row(
+                    "[dim]  ↳ No admin DOM[/dim]",
+                    f"[dim]{fp_stats['filtered_no_admin_dom']}[/dim]",
+                )
+            if fp_stats.get("filtered_unverified"):
+                table.add_row(
+                    "[dim]  ↳ No PoC[/dim]",
+                    f"[dim]{fp_stats['filtered_unverified']}[/dim]",
+                )
+            if fp_stats.get("downgraded"):
+                table.add_row(
+                    "[dim]  ↳ Downgraded[/dim]",
+                    f"[dim]{fp_stats['downgraded']}[/dim]",
+                )
+
+        # ── Cache stats ──
+        if self._http_client:
+            stats = self._http_client.cache_stats()
+            table.add_row(
+                "[dim]Cache hits[/dim]",
+                f"[dim]{stats['hits']} ({stats['hit_rate'] * 100:.1f}%)[/dim]",
             )
 
         table.add_row("─" * 20, "─" * 5)
@@ -141,13 +210,23 @@ class BugScanner:
         for sev, count in result.vuln_count_by_severity.items():
             if count > 0:
                 c = colors.get(sev, "")
-                table.add_row(f"  [{c}]{sev.upper()}[/{c}]", f"[{c}]{count}[/{c}]")
+                table.add_row(
+                    f"  [{c}]{sev.upper()}[/{c}]",
+                    f"[{c}]{count}[/{c}]",
+                )
 
-        table.add_row("[bold]Risk Score[/bold]", f"[bold]{result.risk_score}/10[/bold]")
+        table.add_row(
+            "[bold]Risk Score[/bold]",
+            f"[bold]{result.risk_score}/10[/bold]",
+        )
         console.print(table)
 
-    async def _apply_waf_evasion(self, http: HttpClient, base_url: str) -> dict:
-        """Detect WAF and tune the rate limiter accordingly."""
+    # ══════════════════════════════════════════════════════════
+    #  WAF evasion
+    # ══════════════════════════════════════════════════════════
+    async def _apply_waf_evasion(
+        self, http: HttpClient, base_url: str
+    ) -> dict:
         console.print("\n[bold cyan]🛡️  WAF Detection...[/bold cyan]")
         detector = WAFDetector(http)
         waf_info = await detector.detect(base_url)
@@ -158,18 +237,29 @@ class BugScanner:
             ext = tldextract.extract(base_url)
             domain = f"{ext.domain}.{ext.suffix}"
 
-            # Use the existing public-ish accessor instead of mutating
-            # the private bucket dict directly.
-            bucket = self.rate_limiter._get_bucket(domain)
-            bucket.rps = max(self.rate_limiter.min_rps, float(evasion["rps"]))
+            self.rate_limiter.set_domain_rps(
+                domain, float(evasion["rps"])
+            )
+            self.rate_limiter.set_domain_delay(
+                domain, float(evasion["delay"])
+            )
 
             console.print(
                 f"  [yellow]Evasion active:[/yellow] "
                 f"RPS→{evasion['rps']}, delay→{evasion['delay']}s"
             )
+            log.warning(
+                "waf_evasion_applied",
+                waf=waf_info["waf"],
+                rps=evasion["rps"],
+                delay=evasion["delay"],
+            )
 
         return waf_info
 
+    # ══════════════════════════════════════════════════════════
+    #  Main scan
+    # ══════════════════════════════════════════════════════════
     async def scan(
         self,
         target: str,
@@ -183,7 +273,6 @@ class BugScanner:
 
         self._print_banner(target)
         result = ScanResult(target=target)
-        result.false_positives_filtered = 0
 
         base_url = target
         if not base_url.startswith(("http://", "https://")):
@@ -194,13 +283,18 @@ class BugScanner:
         domain = f"{ext.domain}.{ext.suffix}"
 
         async with HttpClient(self.rate_limiter, **self.http_config) as http:
+            self._http_client = http
 
-            # ── WAF Detection ─────────────────────────────
+            # ── WAF Detection ──
             await self._apply_waf_evasion(http, base_url)
 
-            # ── RECON ─────────────────────────────────────
+            # ══════════════════════════════════════════════════
+            #  RECON
+            # ══════════════════════════════════════════════════
             if "recon" in modes:
-                console.print(Panel("[bold]RECON PHASE[/bold]", border_style="blue"))
+                console.print(
+                    Panel("[bold]RECON PHASE[/bold]", border_style="blue")
+                )
 
                 console.print("\n[bold cyan]🔎 Fingerprinting...[/bold cyan]")
                 fp = TechFingerprinter(http)
@@ -213,17 +307,28 @@ class BugScanner:
                     result.subdomains = await sub_scanner.scan(domain)
 
                 port_scanner = PortScanner()
-                result.open_ports = await port_scanner.scan(domain, mode=port_mode)
+                result.open_ports = await port_scanner.scan(
+                    domain, mode=port_mode
+                )
 
-                console.print("\n[bold cyan]🗂  Endpoint Discovery...[/bold cyan]")
+                console.print(
+                    "\n[bold cyan]🗂  Endpoint Discovery...[/bold cyan]"
+                )
                 disc = DiscoveryScanner(http)
                 endpoints, disc_vulns = await disc.scan(base_url)
                 result.endpoints = endpoints
                 result.vulnerabilities.extend(disc_vulns)
 
-            # ── VULNS ─────────────────────────────────────
+            # ══════════════════════════════════════════════════
+            #  VULNS
+            # ══════════════════════════════════════════════════
             if "vulns" in modes:
-                console.print(Panel("[bold]VULNERABILITY SCAN PHASE[/bold]", border_style="red"))
+                console.print(
+                    Panel(
+                        "[bold]VULNERABILITY SCAN PHASE[/bold]",
+                        border_style="red",
+                    )
+                )
 
                 xss      = XSSScanner(http)
                 sqli     = SQLiScanner(http)
@@ -234,7 +339,9 @@ class BugScanner:
                 idor     = IDORScanner(http)
                 disc_sc  = DisclosureScanner(http)
 
-                console.print("\n[bold cyan]📂 Information Disclosure...[/bold cyan]")
+                console.print(
+                    "\n[bold cyan]📂 Information Disclosure...[/bold cyan]"
+                )
                 result.vulnerabilities.extend(await disc_sc.scan(base_url))
 
                 console.print("\n[bold cyan]🌐 CORS...[/bold cyan]")
@@ -243,14 +350,20 @@ class BugScanner:
                 console.print("\n[bold cyan]⚡ XSS...[/bold cyan]")
                 result.vulnerabilities.extend(await xss.scan(base_url))
 
-                console.print("\n[bold cyan]💉 SQL Injection...[/bold cyan]")
+                console.print(
+                    "\n[bold cyan]💉 SQL Injection...[/bold cyan]"
+                )
                 result.vulnerabilities.extend(await sqli.scan(base_url))
 
                 console.print("\n[bold cyan]🔄 SSRF...[/bold cyan]")
                 result.vulnerabilities.extend(await ssrf.scan(base_url))
 
-                console.print("\n[bold cyan]↪️  Open Redirect...[/bold cyan]")
-                result.vulnerabilities.extend(await redirect.scan(base_url))
+                console.print(
+                    "\n[bold cyan]↪️  Open Redirect...[/bold cyan]"
+                )
+                result.vulnerabilities.extend(
+                    await redirect.scan(base_url)
+                )
 
                 console.print("\n[bold cyan]🔑 JWT...[/bold cyan]")
                 result.vulnerabilities.extend(await jwt.scan(base_url))
@@ -260,7 +373,9 @@ class BugScanner:
 
                 # Discovered endpoints
                 if result.endpoints:
-                    console.print("\n[bold cyan]🔁 Endpoint scan...[/bold cyan]")
+                    console.print(
+                        "\n[bold cyan]🔁 Endpoint scan...[/bold cyan]"
+                    )
                     for ep_url in result.endpoints[:15]:
                         ep_results = await asyncio.gather(
                             xss.scan(ep_url),
@@ -273,10 +388,15 @@ class BugScanner:
                             if isinstance(r, list):
                                 result.vulnerabilities.extend(r)
 
-                # Live subdomain vuln scan
-                live_subs = [s for s in result.subdomains if s.status and s.status < 400]
+                # Live subdomains
+                live_subs = [
+                    s for s in result.subdomains
+                    if s.status and s.status < 400
+                ]
                 if live_subs:
-                    console.print("\n[bold cyan]🌐 Subdomain vuln scan...[/bold cyan]")
+                    console.print(
+                        "\n[bold cyan]🌐 Subdomain vuln scan...[/bold cyan]"
+                    )
                     for sub in live_subs[:10]:
                         sub_url = f"https://{sub.subdomain}"
                         sub_results = await asyncio.gather(
@@ -291,24 +411,80 @@ class BugScanner:
 
                 # Business Logic
                 if self.run_business_logic:
-                    console.print("\n[bold cyan]🧠 Business Logic...[/bold cyan]")
+                    console.print(
+                        "\n[bold cyan]🧠 Business Logic...[/bold cyan]"
+                    )
                     bl = BusinessLogicScanner(http)
-                    result.vulnerabilities.extend(await bl.scan(base_url))
+                    result.vulnerabilities.extend(
+                        await bl.scan(base_url)
+                    )
 
                 # Nuclei
                 if self.run_nuclei:
                     console.print("\n[bold cyan]☢️  Nuclei...[/bold cyan]")
-                    nuclei = NucleiWrapper()
-                    result.vulnerabilities.extend(await nuclei.scan(base_url))
+                    nuclei = NucleiWrapper(self.config)
+                    result.vulnerabilities.extend(
+                        await nuclei.scan(base_url)
+                    )
 
-                # False-Positive Validation
+                # ══════════════════════════════════════════════
+                #  FALSE-POSITIVE FILTERING (2 stages)
+                # ══════════════════════════════════════════════
                 if self.validate_fp and result.vulnerabilities:
-                    validator = FalsePositiveValidator(http)
-                    confirmed, filtered = await validator.validate_all(result.vulnerabilities)
-                    result.vulnerabilities = confirmed
-                    result.false_positives_filtered = len(filtered)
+                    # ── Stage 1: Static FP filter (signatures, SPA, DOM, context)
+                    console.print(
+                        "\n[bold cyan]🔎 False-positive filter "
+                        "(signatures + SPA)...[/bold cyan]"
+                    )
+                    fp_filter = FPFilter(http)
+                    kept, dropped = await fp_filter.filter_all(
+                        result.vulnerabilities, base_url
+                    )
+                    result.vulnerabilities = kept
+                    fp_stats = fp_filter.summary()
+                    result.fp_stats = fp_stats
 
+                    console.print(
+                        f"  [green]✓ Kept: {len(kept)}[/green]  "
+                        f"[dim]FP filtered: {dropped}[/dim]"
+                    )
+
+                    # ── Stage 2: Active validation (re-request confirmation)
+                    if kept:
+                        console.print(
+                            "\n[bold cyan]🔬 Active verification...[/bold cyan]"
+                        )
+                        validator = FalsePositiveValidator(http)
+                        confirmed, filtered2 = await validator.validate_all(
+                            kept
+                        )
+                        result.vulnerabilities = confirmed
+                        result.false_positives_filtered = (
+                            dropped + len(filtered2)
+                        )
+                    else:
+                        result.false_positives_filtered = dropped
+
+        # ══════════════════════════════════════════════════════
+        #  Finish
+        # ══════════════════════════════════════════════════════
         result.end_time = datetime.now()
         console.print()
         self._print_summary(result)
+
+        log.info(
+            "scan_completed",
+            target=target,
+            duration_s=round(
+                (result.end_time - result.start_time).total_seconds(), 1
+            ),
+            vulns=len(result.vulnerabilities),
+            risk_score=result.risk_score,
+            cache=(
+                self._http_client.cache_stats()
+                if self._http_client else {}
+            ),
+            fp_stats=result.fp_stats,
+        )
+
         return result

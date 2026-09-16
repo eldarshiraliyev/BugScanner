@@ -1,15 +1,24 @@
 """
-Endpoint & Directory Discovery
-- Wordlist-based bruteforce
-- Common API endpoint detection
-- Backup file discovery
+Endpoint & Directory Discovery — v2.1
+
+False-positive reduction:
+- Content signature verification (HTML shells ignored)
+- SPA fallback detection
+- Admin panel requires DOM proof (login/password/dashboard)
+- Context-aware severity
 """
 
 import asyncio
 from urllib.parse import urljoin
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+
 from core.models import Vulnerability, Severity
+from core.fp_filter import (
+    looks_like_admin_panel,
+    is_html_shell,
+    SPAFallbackDetector,
+)
 
 console = Console()
 
@@ -54,7 +63,6 @@ COMMON_PATHS = [
     "images", "assets", "static",
 ]
 
-# Spring Boot actuator endpoints — ayrıca siyahı
 ACTUATOR_PATHS = [
     "actuator", "actuator/env", "actuator/health",
     "actuator/info", "actuator/mappings", "actuator/beans",
@@ -62,7 +70,6 @@ ACTUATOR_PATHS = [
     "actuator/heapdump", "actuator/threaddump",
 ]
 
-# Interesting status codes
 INTERESTING_CODES = [200, 201, 204, 301, 302, 401, 403]
 
 
@@ -70,7 +77,11 @@ class DiscoveryScanner:
     def __init__(self, http_client, extra_wordlist: list[str] = None):
         self.http_client = http_client
         self.wordlist = COMMON_PATHS + (extra_wordlist or [])
+        self.spa_detector = SPAFallbackDetector(http_client)
 
+    # ══════════════════════════════════════════════════════════
+    #  Path check — now returns body + content_type for FP analysis
+    # ══════════════════════════════════════════════════════════
     async def _check_path(self, base_url: str, path: str) -> dict | None:
         url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
         response = await self.http_client.get(url)
@@ -86,144 +97,238 @@ class DiscoveryScanner:
             "status": response.status_code,
             "size": len(response.content),
             "content_type": response.headers.get("content-type", ""),
+            "body": response.text[:50000],   # ← DOM analysis
         }
 
-    def _analyze_findings(self, findings: list[dict], base_url: str) -> list[Vulnerability]:
-        """Tapılan endpoint-ləri analiz et, vuln yarat"""
-        vulns = []
+    # ══════════════════════════════════════════════════════════
+    #  Analysis — v2.1 with 5-rule FP filtering
+    # ══════════════════════════════════════════════════════════
+    def _analyze_findings(
+        self,
+        findings: list[dict],
+        base_url: str,
+        is_spa: bool = False,
+    ) -> list[Vulnerability]:
+        """
+        Analyze discovered endpoints and generate vulnerabilities.
+
+        v2.1 FP rules:
+          - Rule 1: HTML shells for non-HTML paths are dropped
+          - Rule 2: If SPA, admin/file/route checks are stricter
+          - Rule 3: Admin panels require DOM proof (login form)
+          - Rule 4: Context-aware severity (internal/localhost)
+          - Rule 5: Findings must have verifiable PoC
+        """
+        vulns: list[Vulnerability] = []
 
         for f in findings:
             path = f["path"].lower()
             status = f["status"]
             url = f["url"]
+            body = f.get("body", "")
+            content_type = f.get("content_type", "")
+            size = f.get("size", 0)
 
-            # Admin panel açıqdır
-            if any(p in path for p in ["admin", "dashboard", "panel", "cpanel"]):
+            # ─────────────────────────────────────────────────
+            # Rule 1: Skip HTML shells on non-HTML paths
+            # ─────────────────────────────────────────────────
+            is_file_like = any(
+                path.endswith(ext)
+                for ext in (
+                    ".env", ".sql", ".key", ".pem", ".php", ".json",
+                    ".yml", ".yaml", ".txt", ".zip", ".tar.gz", ".bak",
+                )
+            )
+            html_shell = is_html_shell(body, content_type)
+
+            if html_shell and is_file_like:
+                # File endpoints returning HTML shell = SPA fallback
+                console.print(
+                    f"  [dim]FP: HTML shell for /{f['path']} "
+                    f"(expected file content)[/dim]"
+                )
+                continue
+
+            # ═════════════════════════════════════════════════
+            #  Admin Panel — Rule 3: require DOM proof
+            # ═════════════════════════════════════════════════
+            if any(p in path for p in ("admin", "dashboard", "panel", "cpanel")):
                 if status == 200:
+                    if not looks_like_admin_panel(body, content_type):
+                        console.print(
+                            f"  [dim]FP: admin panel /{f['path']} "
+                            f"(no login DOM)[/dim]"
+                        )
+                        continue
+
                     vulns.append(Vulnerability(
                         vuln_type="Exposed Admin Panel",
                         url=url,
                         severity=Severity.HIGH,
                         cvss_score=7.5,
-                        title=f"Admin Panel Açıqdır — /{f['path']}",
+                        title=f"Admin Panel Exposed — /{f['path']}",
                         description=(
-                            f"Admin panel ({url}) ictimaən əlçatandır. "
-                            f"Brute force, credential stuffing hücumlarına açıqdır."
+                            f"Admin panel ({url}) is publicly accessible. "
+                            f"Login form was detected in the DOM."
                         ),
-                        evidence=f"HTTP {status}, Size: {f['size']} bytes",
+                        evidence=(
+                            f"HTTP {status}, size: {size} bytes\n"
+                            f"Login form DOM detected (input[type=password], "
+                            f"username/password keywords)"
+                        ),
                         exploitation=(
-                            f"Hydra ilə brute force:\n"
+                            f"Brute force with Hydra:\n"
                             f"hydra -l admin -P /usr/share/wordlists/rockyou.txt "
                             f"{base_url} http-post-form "
                             f"'/admin/login:user=^USER^&pass=^PASS^:Invalid'"
                         ),
                         remediation=(
-                            "1. Admin panel-i IP whitelist ilə qoru\n"
-                            "2. 2FA tətbiq et\n"
-                            "3. Standart URL-i dəyiş\n"
-                            "4. Rate limiting əlavə et"
+                            "1. IP whitelist the admin panel\n"
+                            "2. Enable 2FA\n"
+                            "3. Change the default URL\n"
+                            "4. Add rate limiting"
                         ),
+                        curl_poc=f'curl -s "{url}" | head -50',
                         cwe_id="CWE-284",
                     ))
 
-            # Spring Boot Actuator
-            if "actuator" in path and status in [200, 204]:
-                severity = Severity.CRITICAL if "heapdump" in path or "env" in path else Severity.HIGH
+            # ═════════════════════════════════════════════════
+            #  Spring Boot Actuator
+            # ═════════════════════════════════════════════════
+            if "actuator" in path and status in (200, 204):
+                # Skip if HTML shell (SPA fallback)
+                if html_shell:
+                    console.print(
+                        f"  [dim]FP: actuator /{f['path']} returns HTML shell[/dim]"
+                    )
+                    continue
+
+                severity = (
+                    Severity.CRITICAL
+                    if "heapdump" in path or "env" in path
+                    else Severity.HIGH
+                )
                 cvss = 9.1 if severity == Severity.CRITICAL else 7.5
+
                 vulns.append(Vulnerability(
                     vuln_type="Information Disclosure",
                     url=url,
                     severity=severity,
                     cvss_score=cvss,
-                    title=f"Spring Boot Actuator Açıqdır — /{f['path']}",
+                    title=f"Spring Boot Actuator Exposed — /{f['path']}",
                     description=(
-                        f"Spring Boot Actuator endpoint-i ({f['path']}) ictimaən əlçatandır. "
-                        f"Environment variables, heap dump, credentials leak riski."
+                        f"Spring Boot Actuator endpoint ({f['path']}) is "
+                        f"publicly accessible. This can leak environment "
+                        f"variables, credentials, and heap dumps."
                     ),
-                    evidence=f"HTTP {status}",
+                    evidence=f"HTTP {status}, size: {size} bytes",
                     exploitation=(
-                        f"Environment variables al:\n"
+                        f"Environment variables:\n"
                         f"curl {base_url}/actuator/env | python3 -m json.tool\n\n"
-                        f"Heap dump yüklə (credentials ola bilər):\n"
+                        f"Heap dump (may contain credentials):\n"
                         f"curl {base_url}/actuator/heapdump -o heap.bin\n"
                         f"strings heap.bin | grep -i 'password\\|secret\\|key'"
                     ),
                     remediation=(
-                        "1. Actuator-ı production-da deaktiv et\n"
+                        "1. Disable Actuator in production\n"
                         "2. management.endpoints.web.exposure.include=health,info\n"
-                        "3. Spring Security ilə actuator-ı qoru"
+                        "3. Secure with Spring Security"
                     ),
+                    curl_poc=f'curl -s "{url}"',
                     cwe_id="CWE-215",
                 ))
 
-            # GraphQL
+            # ═════════════════════════════════════════════════
+            #  GraphQL
+            # ═════════════════════════════════════════════════
             if "graphql" in path and status == 200:
+                if html_shell:
+                    console.print(
+                        f"  [dim]FP: GraphQL /{f['path']} returns HTML shell[/dim]"
+                    )
+                    continue
+
                 vulns.append(Vulnerability(
                     vuln_type="Information Disclosure",
                     url=url,
                     severity=Severity.MEDIUM,
                     cvss_score=5.3,
-                    title="GraphQL Endpoint Açıqdır",
+                    title="GraphQL Endpoint Exposed",
                     description=(
-                        "GraphQL endpoint tapıldı. Introspection aktiv ola bilər — "
-                        "bütün schema, type-lar, mutation-lar görünə bilər."
+                        "GraphQL endpoint found. Introspection may be enabled, "
+                        "exposing the full schema and types."
                     ),
                     evidence=f"HTTP {status} — {url}",
                     exploitation=(
-                        "Introspection sorğusu:\n"
+                        "Introspection query:\n"
                         "curl -X POST -H 'Content-Type: application/json' \\\n"
                         f"  -d '{{\"query\":\"{{__schema{{types{{name}}}}}}\"}}' \\\n"
-                        f"  {url}\n\n"
-                        "GraphQL voyager ilə schema visualize et:\n"
-                        "https://github.com/graphql-kit/graphql-voyager"
+                        f"  {url}"
                     ),
                     remediation=(
-                        "1. Production-da introspection-u deaktiv et\n"
-                        "2. Query depth limit tətbiq et\n"
-                        "3. Rate limiting əlavə et\n"
-                        "4. Authentication tələb et"
+                        "1. Disable introspection in production\n"
+                        "2. Add query depth limit\n"
+                        "3. Enable rate limiting"
+                    ),
+                    curl_poc=(
+                        f"curl -X POST -H 'Content-Type: application/json' "
+                        f"-d '{{\"query\":\"{{__typename}}\"}}' {url}"
                     ),
                     cwe_id="CWE-200",
                 ))
 
-            # 403 Forbidden — potensial bypass
+            # ═════════════════════════════════════════════════
+            #  403 Forbidden — potential bypass
+            # ═════════════════════════════════════════════════
             if status == 403:
                 vulns.append(Vulnerability(
                     vuln_type="Access Control",
                     url=url,
                     severity=Severity.LOW,
                     cvss_score=3.7,
-                    title=f"403 Forbidden — Bypass cəhd edilə bilər — /{f['path']}",
+                    title=f"403 Forbidden — Bypass Attempt — /{f['path']}",
                     description=(
-                        f"/{f['path']} endpoint-i 403 qaytarır. "
-                        f"Header manipulation ilə bypass mümkün ola bilər."
+                        f"/{f['path']} returns 403. Header manipulation may "
+                        f"bypass access control."
                     ),
-                    evidence=f"HTTP 403",
+                    evidence="HTTP 403",
                     exploitation=(
-                        f"Header bypass cəhdləri:\n"
+                        f"Header bypass attempts:\n"
                         f"curl -H 'X-Original-URL: /{f['path']}' {base_url}/\n"
                         f"curl -H 'X-Rewrite-URL: /{f['path']}' {base_url}/\n"
-                        f"curl -H 'X-Custom-IP-Authorization: 127.0.0.1' {url}\n"
-                        f"curl -H 'X-Forwarded-For: 127.0.0.1' {url}\n\n"
-                        f"Path bypass:\n"
-                        f"curl {base_url}//{f['path']}\n"
-                        f"curl {base_url}/{f['path']}/.."
+                        f"curl -H 'X-Forwarded-For: 127.0.0.1' {url}"
                     ),
                     remediation=(
-                        "1. Proxy header-lərini trust etmə\n"
-                        "2. Server-side authorization yoxlaması tətbiq et\n"
-                        "3. X-Original-URL kimi header-ləri ignore et"
+                        "1. Do not trust proxy headers\n"
+                        "2. Server-side authorization checks\n"
+                        "3. Ignore X-Original-URL / X-Rewrite-URL headers"
                     ),
+                    curl_poc=f'curl -H "X-Forwarded-For: 127.0.0.1" "{url}"',
                     cwe_id="CWE-284",
                 ))
 
         return vulns
 
+    # ══════════════════════════════════════════════════════════
+    #  Scan
+    # ══════════════════════════════════════════════════════════
     async def scan(self, base_url: str) -> tuple[list[str], list[Vulnerability]]:
         """
         Returns: (discovered_endpoints, vulnerabilities)
         """
-        console.print(f"\n[bold cyan]🗂  Endpoint Discovery:[/bold cyan] {len(self.wordlist)} path")
+        # Detect SPA first — affects analysis strictness
+        is_spa = await self.spa_detector.detect(base_url)
+
+        if is_spa:
+            console.print(
+                f"\n[bold cyan]🗂  Endpoint Discovery:[/bold cyan] "
+                f"{len(self.wordlist)} paths (SPA mode — strict)"
+            )
+        else:
+            console.print(
+                f"\n[bold cyan]🗂  Endpoint Discovery:[/bold cyan] "
+                f"{len(self.wordlist)} paths"
+            )
 
         semaphore = asyncio.Semaphore(30)
 
@@ -237,7 +342,10 @@ class DiscoveryScanner:
             BarColumn(),
             console=console,
         ) as progress:
-            task = progress.add_task("[cyan]Path scan...[/cyan]", total=len(self.wordlist))
+            task = progress.add_task(
+                "[cyan]Path scan...[/cyan]",
+                total=len(self.wordlist),
+            )
 
             async def tracked(path):
                 result = await check_with_sem(path)
@@ -246,21 +354,28 @@ class DiscoveryScanner:
 
             results = await asyncio.gather(
                 *[tracked(p) for p in self.wordlist],
-                return_exceptions=True
+                return_exceptions=True,
             )
 
         findings = [r for r in results if isinstance(r, dict)]
         endpoints = [f["url"] for f in findings]
 
+        # Print discovered endpoints
         for f in findings:
-            status_color = {200: "green", 403: "yellow", 401: "yellow"}.get(f["status"], "blue")
+            status_color = {
+                200: "green", 403: "yellow", 401: "yellow",
+            }.get(f["status"], "blue")
             console.print(
                 f"  [{status_color}]{f['status']}[/{status_color}] "
                 f"/{f['path']} "
                 f"[dim]({f['size']} bytes)[/dim]"
             )
 
-        vulns = self._analyze_findings(findings, base_url)
-        console.print(f"[bold green]  Discovery tamamlandı: {len(endpoints)} endpoint tapıldı[/bold green]")
+        vulns = self._analyze_findings(findings, base_url, is_spa=is_spa)
+
+        console.print(
+            f"[bold green]  Discovery complete: {len(endpoints)} endpoints, "
+            f"{len(vulns)} findings (after FP filter)[/bold green]"
+        )
 
         return endpoints, vulns

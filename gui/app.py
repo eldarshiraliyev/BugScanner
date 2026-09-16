@@ -1,15 +1,17 @@
 """
-FastAPI Backend — WebSocket ilə real-time scan progress
+FastAPI Backend — WebSocket real-time scan progress
+v2.1: API key authentication + structured logging.
 """
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,21 +22,42 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.scanner import BugScanner
 from core.reporter import Reporter
+from core.logger import get_logger
 
-app = FastAPI(title="BugScanner API", version="1.0")
+log = get_logger("api")
 
+app = FastAPI(title="BugScanner API", version="2.1")
+
+# CORS — restrict in production via env vars
+ALLOWED_ORIGINS = os.getenv("BUGSCANNER_CORS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Aktiv scan-lar
+# ══════════════════════════════════════════════════════════
+#  API key auth
+# ══════════════════════════════════════════════════════════
+API_KEY = os.getenv("BUGSCANNER_API_KEY")
+AUTH_REQUIRED = bool(API_KEY)
+
+
+async def verify_api_key(x_api_key: Optional[str] = Header(default=None)):
+    """Validate API key when configured via BUGSCANNER_API_KEY env var."""
+    if not AUTH_REQUIRED:
+        # Auth not configured → open (dev mode)
+        return
+    if not x_api_key or x_api_key != API_KEY:
+        log.warning("unauthorized_api_access", provided=bool(x_api_key))
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# Active scans
 active_scans: dict[str, dict] = {}
 
 
-# ── Request modelləri ──────────────────────────────────
 class ScanRequest(BaseModel):
     url: str
     mode: str = "all"
@@ -44,7 +67,6 @@ class ScanRequest(BaseModel):
     severity_filter: Optional[list[str]] = None
 
 
-# ── WebSocket manager ──────────────────────────────────
 class ConnectionManager:
     def __init__(self):
         self.connections: dict[str, WebSocket] = {}
@@ -68,40 +90,20 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-# ── Rich console-u WebSocket-ə yönləndir ──────────────
-class WSConsole:
-    """Rich console əvəzinə — mesajları WS-ə göndər"""
-    def __init__(self, scan_id: str, loop: asyncio.AbstractEventLoop):
-        self.scan_id = scan_id
-        self.loop = loop
-        self._buffer = []
-
-    def print(self, *args, **kwargs):
-        # Rich markup-ı sil
-        import re
-        text = " ".join(str(a) for a in args)
-        text = re.sub(r'\[/?[^\]]+\]', '', text)
-        text = text.strip()
-        if text:
-            self._buffer.append(text)
-            asyncio.run_coroutine_threadsafe(
-                manager.send(self.scan_id, {
-                    "type": "log",
-                    "message": text,
-                    "timestamp": datetime.now().isoformat(),
-                }),
-                self.loop
-            )
-
-
-# ── Endpoints ──────────────────────────────────────────
+# ══════════════════════════════════════════════════════════
+#  Endpoints
+# ══════════════════════════════════════════════════════════
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "1.0"}
+    return {
+        "status": "ok",
+        "version": "2.1",
+        "auth_required": AUTH_REQUIRED,
+    }
 
 
 @app.post("/api/scan/start")
-async def start_scan(req: ScanRequest):
+async def start_scan(req: ScanRequest, _=Depends(verify_api_key)):
     scan_id = str(uuid.uuid4())[:8]
 
     active_scans[scan_id] = {
@@ -113,9 +115,9 @@ async def start_scan(req: ScanRequest):
         "error": None,
     }
 
-    # Background-da scan başlat
-    asyncio.create_task(_run_scan(scan_id, req))
+    log.info("scan_queued", scan_id=scan_id, url=req.url, mode=req.mode)
 
+    asyncio.create_task(_run_scan(scan_id, req))
     return {"scan_id": scan_id, "status": "queued"}
 
 
@@ -125,7 +127,7 @@ async def _run_scan(scan_id: str, req: ScanRequest):
     await manager.send(scan_id, {
         "type": "status",
         "status": "running",
-        "message": f"Scan başladı: {req.url}",
+        "message": f"Scan started: {req.url}",
     })
 
     try:
@@ -143,14 +145,11 @@ async def _run_scan(scan_id: str, req: ScanRequest):
             skip_subdomains=req.skip_subdomains,
         )
 
-        # Report saxla
         reporter = Reporter()
         paths = await reporter.save_all(result)
 
         result_dict = result.to_dict()
-        result_dict["report_paths"] = {
-            k: str(v) for k, v in paths.items()
-        }
+        result_dict["report_paths"] = {k: str(v) for k, v in paths.items() if v}
 
         active_scans[scan_id]["status"] = "completed"
         active_scans[scan_id]["result"] = result_dict
@@ -160,8 +159,11 @@ async def _run_scan(scan_id: str, req: ScanRequest):
             "status": "completed",
             "result": result_dict,
         })
+        log.info("scan_completed_api", scan_id=scan_id,
+                 vulns=len(result.vulnerabilities))
 
     except Exception as e:
+        log.exception("scan_failed", scan_id=scan_id, error=str(e))
         active_scans[scan_id]["status"] = "error"
         active_scans[scan_id]["error"] = str(e)
 
@@ -173,20 +175,20 @@ async def _run_scan(scan_id: str, req: ScanRequest):
 
 
 @app.get("/api/scan/{scan_id}")
-async def get_scan(scan_id: str):
+async def get_scan(scan_id: str, _=Depends(verify_api_key)):
     scan = active_scans.get(scan_id)
     if not scan:
-        raise HTTPException(404, "Scan tapılmadı")
+        raise HTTPException(404, "Scan not found")
     return scan
 
 
 @app.get("/api/scans")
-async def list_scans():
+async def list_scans(_=Depends(verify_api_key)):
     return list(active_scans.values())
 
 
 @app.delete("/api/scan/{scan_id}")
-async def delete_scan(scan_id: str):
+async def delete_scan(scan_id: str, _=Depends(verify_api_key)):
     active_scans.pop(scan_id, None)
     return {"deleted": scan_id}
 
@@ -195,7 +197,6 @@ async def delete_scan(scan_id: str):
 async def websocket_endpoint(scan_id: str, ws: WebSocket):
     await manager.connect(scan_id, ws)
     try:
-        # Əgər scan artıq qurtarıbsa — nəticəni dərhal göndər
         scan = active_scans.get(scan_id)
         if scan and scan["status"] == "completed":
             await ws.send_text(json.dumps({
@@ -209,14 +210,14 @@ async def websocket_endpoint(scan_id: str, ws: WebSocket):
         manager.disconnect(scan_id)
 
 
-# Static files — React build
+# Static files
 static_dir = Path(__file__).parent / "frontend" / "dist"
 if static_dir.exists():
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
 else:
     @app.get("/")
     async def root():
-        return JSONResponse({"message": "Frontend build yoxdur. npm run build edin."})
+        return JSONResponse({"message": "Frontend build not found. Run `npm run build`."})
 
 
 if __name__ == "__main__":
